@@ -1,0 +1,179 @@
+{
+  "site": {
+    "id": "jezero",
+    "name": "Jezero Crater - western delta front"
+  },
+  "body": {
+    "name": "Mars",
+    "radius_m": 3396190.0
+  },
+  "center": {
+    "lat": 18.455,
+    "lon": 77.425,
+    "latitude_type": "planetocentric",
+    "longitude_direction": "east-positive"
+  },
+  "projection": "+proj=eqc +lat_ts=18.455 +lat_0=18.455 +lon_0=77.425 +x_0=0 +y_0=0 +R=3396190.0 +units=m +no_defs",
+  "extent_m": {
+    "west": -2048.0,
+    "north": 2048.0,
+    "east": 2048.0,
+    "south": -2048.0
+  },
+  "bounds_deg": {
+    "west": 77.38857579828257,
+    "east": 77.46142420171742,
+    "south": 18.420449001250578,
+    "north": 18.48955099874942
+  },
+  "heightmap": {
+    "file": "heightmap.bin",
+    "format": "float32-le",
+    "width": 2048,
+    "height": 2048,
+    "spacing_m": 2.0,
+    "row0": "north",
+    "registration": "pixel-is-area (values at cell centres)",
+    "units": "m",
+    "min": -2592.736572265625,
+    "max": -2430.8837890625,
+    "vertical_reference": "Metres relative to the Mars areoid (MOLA topography convention), consistent with NASA Mars 2020 waypoint elev_geoid to 0.1 m; horizontal frame: Mars 2000 IAU sphere, R = 3,396,190 m",
+    "resampling": "area average from 1 m source"
+  },
+  "texture": {
+    "file": "texture.jpg",
+    "width": 4096,
+    "height": 4096,
+    "pixel_m": 1.0,
+    "resampling": "area average from 0.25 m source",
+    "bands": "HiRISE red (grayscale)"
+  },
+  "products": {
+    "dtm": {
+      "id": "JEZ_hirise_soc_006_DTM_MOLAtopography_DeltaGeoid_1m_Eqc_latTs0_lon0_blend40",
+      "title": "HiRISE Digital Terrain Model Mosaic for Mars 2020 Terrain Relative Navigation",
+      "mission": "Mars Reconnaissance Orbiter",
+      "instrument": "HiRISE",
+      "doi": "10.5066/P9REJ9JN",
+      "url": "https://asc-pds-services.s3.us-west-2.amazonaws.com/mosaic/mars2020_trn/HiRISE/JEZ_hirise_soc_006_DTM_MOLAtopography_DeltaGeoid_1m_Eqc_latTs0_lon0_blend40.tif"
+    },
+    "ortho": {
+      "id": "JEZ_hirise_soc_006_orthoMosaic_25cm_Eqc_latTs0_lon0_first",
+      "title": "HiRISE Orthorectified Image Mosaic for Mars 2020 Terrain Relative Navigation",
+      "mission": "Mars Reconnaissance Orbiter",
+      "instrument": "HiRISE",
+      "doi": "10.5066/P9QJDP48",
+      "url": "https://asc-pds-services.s3.us-west-2.amazonaws.com/mosaic/mars2020_trn/HiRISE/JEZ_hirise_soc_006_orthoMosaic_25cm_Eqc_latTs0_lon0_first.tif"
+    }
+  },
+  "resolution": {
+    "dem_native_m": 1.0,
+    "image_native_m": 0.25
+  },
+  "sources": [
+    {
+      "role": "elevation",
+      "id": "JEZ_hirise_soc_006_DTM_MOLAtopography_DeltaGeoid_1m_Eqc_latTs0_lon0_blend40",
+      "title": "HiRISE Digital Terrain Model Mosaic for Mars 2020 Terrain Relative Navigation",
+      "mission": "Mars Reconnaissance Orbiter",
+      "instrument": "HiRISE",
+      "doi": "10.5066/P9REJ9JN",
+      "citation": null,
+      "info": null,
+      "url": "https://asc-pds-services.s3.us-west-2.amazonaws.com/mosaic/mars2020_trn/HiRISE/JEZ_hirise_soc_006_DTM_MOLAtopography_DeltaGeoid_1m_Eqc_latTs0_lon0_blend40.tif"
+    },
+    {
+      "role": "imagery",
+      "id": "JEZ_hirise_soc_006_orthoMosaic_25cm_Eqc_latTs0_lon0_first",
+      "title": "HiRISE Orthorectified Image Mosaic for Mars 2020 Terrain Relative Navigation",
+      "mission": "Mars Reconnaissance Orbiter",
+      "instrument": "HiRISE",
+      "doi": "10.5066/P9QJDP48",
+      "citation": null,
+      "info": null,
+      "url": "https://asc-pds-services.s3.us-west-2.amazonaws.com/mosaic/mars2020_trn/HiRISE/JEZ_hirise_soc_006_orthoMosaic_25cm_Eqc_latTs0_lon0_first.tif"
+    }
+  ],
+  "validation": {
+    "heights_median_abs_diff_m": 0.009376417028761352,
+    "heights_p95_abs_diff_m": 0.02791422662667171,
+    "geolocation_formula_max_error_m": 7.99024524477402e-10,
+    "n_points": 25,
+    "status": "pass",
+    "checks": [
+      {
+        "name": "Product headers match documented values",
+        "ok": true,
+        "level": "pass",
+        "value": ""
+      },
+      {
+        "name": "No NoData in heightmap",
+        "ok": true,
+        "level": "pass",
+        "value": "-2592.7 .. -2430.9 m"
+      },
+      {
+        "name": "Texture NoData fraction",
+        "ok": true,
+        "level": "pass",
+        "value": "0.0000 %"
+      },
+      {
+        "name": "Heights vs source DTM",
+        "ok": true,
+        "level": "pass",
+        "value": "median 0.009 m, p95 0.028 m"
+      },
+      {
+        "name": "Browser lat/lon formulas vs PROJ",
+        "ok": true,
+        "level": "pass",
+        "value": "0.000 mm"
+      }
+    ]
+  },
+  "generated_utc": "2026-11-14T18:09:34+00:00",
+  "context": {
+    "heightmap": {
+      "file": "context.bin",
+      "format": "float32-le",
+      "width": 256,
+      "height": 256,
+      "spacing_m": 250.0,
+      "row0": "north",
+      "min": -2809.94091796875,
+      "max": -1419.3814697265625
+    },
+    "texture": {
+      "file": "context.jpg",
+      "width": 2048,
+      "height": 2048,
+      "pixel_m": 31.25
+    },
+    "extent_m": {
+      "west": -32000.0,
+      "north": 32000.0,
+      "east": 32000.0,
+      "south": -32000.0
+    },
+    "bounds_deg": {
+      "west": 76.85587184816525,
+      "east": 77.99412815183474,
+      "south": 17.915140644540312,
+      "north": 18.994859355459685
+    },
+    "dem_sample_m": 200.0,
+    "image_native_m": 20.4,
+    "image_level": 10,
+    "image_gap_fraction": 0.0,
+    "note": "Low-resolution surroundings for orientation only: Mars MGS MOLA - MEX HRSC Blended DEM Global 200m v2 subsampled to 200 m, CTX level 10 (~20 m/px). Readouts use the site tile."
+  },
+  "color": {
+    "file": "color.jpg",
+    "context_file": "context_color.jpg",
+    "native_m": 925.4,
+    "source": "USGS Viking Orbiter colour mosaic Mars_Viking_ClrMosaic_global_925m (same as the globe base map)",
+    "method": "colour fusion in the viewer: Viking colour x (image / image averaged over ~925 m); brightness detail from the grayscale image, colour from Viking. Visual product, not a measured colour at the image resolution."
+  }
+}

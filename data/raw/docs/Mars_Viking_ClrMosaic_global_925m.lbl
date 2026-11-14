@@ -1,0 +1,54 @@
+Object = IsisCube
+  Object = Core
+    StartByte = 277368
+    Format    = BandSequential
+
+    Group = Dimensions
+      Samples = 23059
+      Lines   = 11530
+      Bands   = 3
+    End_Group
+
+    Group = Pixels
+      Type       = UnsignedByte
+      ByteOrder  = Lsb
+      Base       = 0.0
+      Multiplier = 1.0
+    End_Group
+    ^Core     = Mars_Viking_ClrMosaic_global_925m.tif
+  End_Object
+
+  Group = Instrument
+    TargetName = Mars
+  End_Group
+
+  Group = BandBin
+    Center       = (1.0, 1.0, 1.0)
+    OriginalBand = (1, 2, 3)
+  End_Group
+
+  Group = Mapping
+    ProjectionName     = SimpleCylindrical
+    CenterLongitude    = 0.0
+    TargetName         = Mars
+    EquatorialRadius   = 3396190.0 <meters>
+    PolarRadius        = 3376200.0 <meters>
+    LatitudeType       = Planetocentric
+    LongitudeDirection = PositiveEast
+    LongitudeDomain    = 180
+    MinimumLatitude    = -90.0
+    MaximumLatitude    = 90.0
+    MinimumLongitude   = -180.0
+    MaximumLongitude   = 180.0
+    UpperLeftCornerX   = -10669931.1799999997 <meters>
+    UpperLeftCornerY   = 5334965.58999999985 <meters>
+    PixelResolution    = 925.405999999999949 <meters/pixel>
+    Scale              = 64.0526399999999967 <pixels/degree>
+  End_Group
+End_Object
+
+Object = Label
+  Bytes = 1294             
+End_Object
+
+End

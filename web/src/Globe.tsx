@@ -1,0 +1,653 @@
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Canvas, useFrame, useThree, type ThreeEvent } from "@react-three/fiber";
+import { Html, OrbitControls, Stars, useTexture } from "@react-three/drei";
+import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
+import * as THREE from "three";
+import { Veil } from "./Veil";
+import {
+  GLOBE_BASE, fmtLat, fmtLonE, latLonToUnit, loadGlobeMeta, loadScalar, unitToLatLon,
+  type GlobeMeta, type LayerDef, type ScalarGrid, type Site,
+} from "./globeData";
+
+const S = 1.65;                      // scene radius of Mars
+const SEG_LON = 1024, SEG_LAT = 512;
+const JEZERO = { lat: 18.455, lon: 77.425 };
+const SIZES = [10, 20, 40] as const;
+const MAX_LAT = 80;   // pipeline/config.yaml global.max_abs_lat
+
+interface Landing {
+  lat: number; lon: number; size: number;
+  status: "requesting" | "queued" | "running" | "done" | "error";
+  stage?: string; progress?: number; error?: string | null; base?: string;
+}
+
+/** POST /api/site, then poll until the site server reports done/error. */
+async function requestSite(lat: number, lon: number, size: number, onUpdate: (l: Partial<Landing>) => void,
+                           cancelled: () => boolean) {
+  const r = await fetch("/api/site", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ lat, lon, size_km: size }),
+  }).catch(() => null);
+  if (!r || r.status === 404 || r.status >= 500)
+    throw new Error("The site builder is not responding. Restart `npm run dev` (it starts the builder automatically) and try again.");
+  let st = await r.json();
+  let retried = false;
+  if (!r.ok) throw new Error(st.error ?? `HTTP ${r.status}`);
+  while (!cancelled()) {
+    onUpdate({ status: st.status, stage: st.stage, progress: st.progress, error: st.error, base: st.base });
+    if (st.status === "done" || st.status === "error") return st;
+    await new Promise((res) => setTimeout(res, 400));
+    const g = await fetch(`/api/site/${st.id}`).catch(() => null);
+    if (!g || g.status >= 500) throw new Error("Lost connection to the site server");
+    const next = await g.json().catch(() => null);
+    if (!next || !next.status) {
+      // Job unknown (server restarted / job dropped): ask for it again once, then give up with a clear error.
+      if (retried) throw new Error(next?.error ?? "The site server lost this request");
+      retried = true;
+      const again = await fetch("/api/site", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ lat, lon, size_km: size }) }).catch(() => null);
+      if (!again || !again.ok) throw new Error("The site server lost this request");
+      st = await again.json();
+      continue;
+    }
+    st = next;
+  }
+  return st;
+}
+
+/** Fire-and-forget background build of the selected point (server keeps only the latest queued prefetch). */
+function prefetchSite(lat: number, lon: number, size: number) {
+  fetch("/api/site", { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ lat, lon, size_km: size, prefetch: true }) }).catch(() => {});
+}
+
+/** Overall 0..1 progress from the server's per-stage progress (elevation and imagery run in parallel). */
+function overallProgress(l: Landing | null): number | null {
+  if (!l) return null;
+  const f = l.progress ?? 0;
+  switch (l.stage) {
+    case "queued": return 0.03;
+    case "elevation": return 0.05 + 0.1 * f;
+    case "imagery": return 0.15 + 0.6 * f;
+    case "processing": return 0.78;
+    case "context": return 0.85 + 0.1 * f;
+    case "done": return 1;
+    default: return null;
+  }
+}
+
+const STAGE_LABEL: Record<string, string> = {
+  queued: "Queued", requesting: "Contacting site builder", elevation: "Reading HRSC–MOLA elevation",
+  imagery: "Fetching CTX imagery tiles", processing: "Reprojecting and validating", context: "Adding surroundings",
+  done: "Ready",
+};
+
+function LandCard({ point, inHiRISE, busy, landing, size, setSize, onLand, onHiRISE }: {
+  point: Pick; inHiRISE: boolean; busy: boolean; landing: Landing | null; size: number; setSize: (s: number) => void;
+  onLand: (size: number) => void; onHiRISE: () => void;
+}) {
+  const polar = Math.abs(point.lat) > MAX_LAT;
+  const active = landing && landing.status !== "error" && landing.status !== "done";
+  return <section className="block land">
+    <div className="block-head"><h2>Land at this point</h2><span className="muted small">3D surface site</span></div>
+    <div className="sizes" role="group" aria-label="Site size">
+      {SIZES.map((s) => <button key={s} aria-pressed={size === s} onClick={() => setSize(s)} disabled={busy}>{s} km</button>)}
+    </div>
+    <button className="primary" onClick={() => onLand(size)} disabled={busy || polar}>
+      {active ? "Building the site" : "Land here"}
+    </button>
+    {polar && <p className="error">Sites are limited to |latitude| ≤ {MAX_LAT}° (local map projection).</p>}
+    {active && <div className="build">
+      <div className="progress"><div style={{ width: `${Math.round((landing.progress ?? 0) * 100)}%` }} /></div>
+      <p className="muted small">{STAGE_LABEL[landing.stage ?? "queued"] ?? landing.stage}</p>
+    </div>}
+    {landing?.status === "error" && <p className="error">Could not build this site: {landing.error}</p>}
+    <p className="muted small">Elevation: HRSC–MOLA, 200 m. Imagery: CTX, about 5 m, uncontrolled. Each site is checked against MOLA.</p>
+    {inHiRISE && <button className="secondary" onClick={onHiRISE} disabled={busy}>Open the HiRISE site here (1 m DTM)</button>}
+  </section>;
+}
+
+type Scalars = Record<string, ScalarGrid>;
+interface Pick { lat: number; lon: number }
+
+/** Scene radius at (lat, lon) including MOLA relief x exaggeration. */
+function radiusAt(elev: ScalarGrid | undefined, exag: number, R: number, lat: number, lon: number) {
+  return elev ? S * (1 + (exag * elev.smooth(lat, lon)) / R) : S;
+}
+
+function buildPlanet(elev: ScalarGrid | undefined, exag: number, R: number) {
+  const cols = SEG_LON + 1, rows = SEG_LAT + 1;
+  const pos = new Float32Array(cols * rows * 3), uv = new Float32Array(cols * rows * 2);
+  let p = 0, q = 0;
+  for (let r = 0; r < rows; r++) {
+    const lat = 90 - (180 * r) / SEG_LAT;
+    for (let c = 0; c < cols; c++) {
+      const lon = -180 + (360 * c) / SEG_LON;
+      const [x, y, z] = latLonToUnit(lat, lon);
+      const rad = radiusAt(elev, exag, R, lat, lon);
+      pos[p++] = x * rad; pos[p++] = y * rad; pos[p++] = z * rad;
+      uv[q++] = (lon + 180) / 360; uv[q++] = (lat + 90) / 180;
+    }
+  }
+  const idx = new Uint32Array(SEG_LON * SEG_LAT * 6);
+  let k = 0;
+  for (let r = 0; r < SEG_LAT; r++) for (let c = 0; c < SEG_LON; c++) {
+    const a = r * cols + c, b = a + 1, d = a + cols, e = d + 1;
+    idx[k++] = a; idx[k++] = d; idx[k++] = b; idx[k++] = b; idx[k++] = d; idx[k++] = e;
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+  g.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
+  g.setIndex(new THREE.BufferAttribute(idx, 1));
+  g.computeVertexNormals();
+  g.computeBoundingSphere();
+  return g;
+}
+
+function useLayerTexture(layer: LayerDef) {
+  const t = useTexture(`${GLOBE_BASE}/${layer.texture}`);
+  useEffect(() => {
+    t.colorSpace = THREE.SRGBColorSpace;
+    t.anisotropy = 8;
+    t.needsUpdate = true;
+  }, [t]);
+  return t;
+}
+
+function Surface({ geometry, base, overlay, opacity, shaded }: {
+  geometry: THREE.BufferGeometry; base: LayerDef; overlay: LayerDef | null; opacity: number; shaded: boolean;
+}) {
+  const baseTex = useLayerTexture(base);
+  return <>
+    <mesh geometry={geometry} raycast={() => null}>
+      {shaded ? <meshStandardMaterial map={baseTex} roughness={1} metalness={0} />
+              : <meshBasicMaterial map={baseTex} />}
+    </mesh>
+    {overlay && <Suspense fallback={null}><Overlay geometry={geometry} layer={overlay} opacity={opacity} /></Suspense>}
+  </>;
+}
+
+function Overlay({ geometry, layer, opacity }: { geometry: THREE.BufferGeometry; layer: LayerDef; opacity: number }) {
+  const tex = useLayerTexture(layer);
+  return <mesh geometry={geometry} scale={1.0006} raycast={() => null} renderOrder={1}>
+    <meshBasicMaterial map={tex} transparent opacity={opacity} depthWrite={false}
+      polygonOffset polygonOffsetFactor={-1} polygonOffsetUnits={-1} />
+  </mesh>;
+}
+
+/** Surface-following polyline (lat/lon list), lifted slightly above the relief. */
+function SurfaceLine({ pts, color, elev, exag, R, lift = 0.0015, width = 1 }: {
+  pts: [number, number][]; color: string; elev?: ScalarGrid; exag: number; R: number; lift?: number; width?: number;
+}) {
+  const obj = useMemo(() => {
+    const arr = new Float32Array(pts.length * 3);
+    pts.forEach(([la, lo], i) => {
+      const [x, y, z] = latLonToUnit(la, lo);
+      const r = radiusAt(elev, exag, R, la, lo) + lift * S;
+      arr.set([x * r, y * r, z * r], i * 3);
+    });
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.BufferAttribute(arr, 3));
+    return new THREE.Line(g, new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.9, linewidth: width }));
+  }, [pts, elev, exag, R, lift, color, width]);
+  useEffect(() => () => { obj.geometry.dispose(); (obj.material as THREE.Material).dispose(); }, [obj]);
+  return <primitive object={obj} raycast={() => null} />;
+}
+
+function Graticule({ elev, exag, R }: { elev?: ScalarGrid; exag: number; R: number }) {
+  const lines = useMemo(() => {
+    const out: { pts: [number, number][]; major: boolean }[] = [];
+    for (let lon = -180; lon < 180; lon += 30) {
+      const pts: [number, number][] = [];
+      for (let lat = -90; lat <= 90; lat += 1) pts.push([lat, lon]);
+      out.push({ pts, major: lon === 0 });
+    }
+    for (let lat = -60; lat <= 60; lat += 30) {
+      const pts: [number, number][] = [];
+      for (let lon = -180; lon <= 180; lon += 1) pts.push([lat, lon]);
+      out.push({ pts, major: lat === 0 });
+    }
+    return out;
+  }, []);
+  return <>{lines.map((l, i) =>
+    <SurfaceLine key={i} pts={l.pts} color={l.major ? "#ffd7b8" : "#ffffff"} elev={elev} exag={exag} R={R} lift={0.002} />)}</>;
+}
+
+function SiteMarker({ site, elev, exag, R, selected, onSelect }: {
+  site: Site; elev?: ScalarGrid; exag: number; R: number; selected: boolean; onSelect: (s: Site) => void;
+}) {
+  const { camera } = useThree();
+  const label = useRef<HTMLDivElement>(null);
+  const [x, y, z] = latLonToUnit(site.lat, site.lon);
+  const r = radiusAt(elev, exag, R, site.lat, site.lon);
+  const pos = new THREE.Vector3(x * r, y * r, z * r);
+  const n = useMemo(() => new THREE.Vector3(x, y, z), [x, y, z]);
+  useFrame(() => {
+    // Hide labels on the far side of the planet.
+    const facing = n.dot(camera.position.clone().sub(pos).normalize()) > 0.05;
+    if (label.current) label.current.style.opacity = facing ? "1" : "0";
+  });
+  const click = (e: ThreeEvent<MouseEvent>) => {
+    e.stopPropagation();
+    if (n.dot(camera.position.clone().sub(pos).normalize()) > 0.05) onSelect(site);
+  };
+  const isM20 = site.id === "perseverance";
+  return <group position={pos}>
+    <mesh onClick={click}>
+      <sphereGeometry args={[selected ? 0.014 : 0.01, 16, 16]} />
+      <meshBasicMaterial color={isM20 ? "#ffd166" : "#7fdbff"} />
+    </mesh>
+    <Html center zIndexRange={[5, 0]} style={{ pointerEvents: "none" }}>
+      <div ref={label} className={`site-label${selected ? " selected" : ""}`}>{site.name}</div>
+    </Html>
+  </group>;
+}
+
+/** Pointer -> lat/lon on the relief surface (ray vs. sphere, refined for the local radius). */
+function Picker({ elev, exag, R, onHover, onPick }: {
+  elev?: ScalarGrid; exag: number; R: number; onHover: (p: Pick | null) => void; onPick: (p: Pick | null) => void;
+}) {
+  const { camera, gl } = useThree();
+  useEffect(() => {
+    const el = gl.domElement, ray = new THREE.Raycaster(), ndc = new THREE.Vector2();
+    let down: { x: number; y: number } | null = null, raf = 0;
+    const pick = (e: PointerEvent): Pick | null => {
+      const b = el.getBoundingClientRect();
+      ndc.set(((e.clientX - b.left) / b.width) * 2 - 1, -((e.clientY - b.top) / b.height) * 2 + 1);
+      ray.setFromCamera(ndc, camera);
+      let rad = S, hit: THREE.Vector3 | null = null;
+      for (let i = 0; i < 4; i++) {
+        const sphere = new THREE.Sphere(new THREE.Vector3(), rad);
+        const h = ray.ray.intersectSphere(sphere, new THREE.Vector3());
+        if (!h) return hit ? unitToLatLon(hit.x, hit.y, hit.z) : null;
+        hit = h;
+        const ll = unitToLatLon(h.x, h.y, h.z);
+        rad = radiusAt(elev, exag, R, ll.lat, ll.lon);
+      }
+      return hit ? unitToLatLon(hit.x, hit.y, hit.z) : null;
+    };
+    const move = (e: PointerEvent) => {
+      if (raf) return;
+      raf = requestAnimationFrame(() => { raf = 0; onHover(pick(e)); });
+    };
+    const pdown = (e: PointerEvent) => { down = { x: e.clientX, y: e.clientY }; };
+    const pup = (e: PointerEvent) => {
+      if (down && e.button === 0 && Math.hypot(e.clientX - down.x, e.clientY - down.y) < 5) onPick(pick(e));
+      down = null;
+    };
+    const leave = () => onHover(null);
+    el.addEventListener("pointermove", move); el.addEventListener("pointerdown", pdown);
+    el.addEventListener("pointerup", pup); el.addEventListener("pointerleave", leave);
+    return () => {
+      el.removeEventListener("pointermove", move); el.removeEventListener("pointerdown", pdown);
+      el.removeEventListener("pointerup", pup); el.removeEventListener("pointerleave", leave);
+      cancelAnimationFrame(raf);
+    };
+  }, [camera, gl, elev, exag, R, onHover, onPick]);
+  return null;
+}
+
+/** Camera flight along a great circle to a lat/lon, then a callback. Also adapts orbit speed to altitude. */
+function CameraDirector({ controls, flyTo, onArrive, onProgress }: {
+  controls: React.RefObject<OrbitControlsImpl>; flyTo: (Pick & { dist: number }) | null; onArrive: () => void;
+  onProgress?: (e: number) => void;
+}) {
+  const { camera } = useThree();
+  const anim = useRef<{ from: THREE.Vector3; q0: THREE.Quaternion; q1: THREE.Quaternion; d0: number; d1: number; t: number } | null>(null);
+  useEffect(() => {
+    if (!flyTo) { anim.current = null; return; }
+    const from = camera.position.clone().normalize();
+    const to = new THREE.Vector3(...latLonToUnit(flyTo.lat, flyTo.lon));
+    anim.current = {
+      from, q0: new THREE.Quaternion(), q1: new THREE.Quaternion().setFromUnitVectors(from, to),
+      d0: camera.position.length(), d1: flyTo.dist, t: 0,
+    };
+  }, [flyTo, camera]);
+  useFrame((_, dt) => {
+    const c = controls.current;
+    if (c) {
+      const alt = camera.position.length() - S;
+      c.rotateSpeed = Math.min(1, Math.max(0.02, alt / (S * 1.6)));
+      c.zoomSpeed = Math.min(1, Math.max(0.25, alt / S));
+    }
+    const a = anim.current;
+    if (!a) return;
+    const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    a.t = reduce ? 1 : Math.min(1, a.t + dt / 2.6);
+    const e = a.t < 0.5 ? 4 * a.t ** 3 : 1 - (-2 * a.t + 2) ** 3 / 2;
+    const q = new THREE.Quaternion().slerpQuaternions(a.q0, a.q1, e);
+    camera.position.copy(a.from.clone().applyQuaternion(q).multiplyScalar(a.d0 + (a.d1 - a.d0) * e));
+    camera.lookAt(0, 0, 0);
+    if (c) { c.target.set(0, 0, 0); c.update(); }
+    onProgress?.(e);
+    if (a.t >= 1) { anim.current = null; onArrive(); }
+  });
+  return null;
+}
+
+function Legend({ layer }: { layer: LayerDef }) {
+  if (!layer.legend) return null;
+  const u = layer.units ? ` ${layer.units}` : "";
+  return <div className="legend">
+    <div className="legend-title">{layer.name}{layer.derived && <span className="badge">derived</span>}</div>
+    <div className="legend-bar" style={{ background: `linear-gradient(90deg, ${layer.legend.join(",")})` }} />
+    <div className="legend-scale"><span>{layer.min}{u}</span><span>{layer.max}{u}</span></div>
+  </div>;
+}
+
+function LayerInfo({ layer }: { layer: LayerDef }) {
+  return <div className="layer-info">
+    <p>{layer.description}</p>
+    <p className="muted">
+      {layer.mission}, {layer.instrument}, <code>{layer.product}</code><br />
+      {layer.source}. <a href={layer.url} target="_blank" rel="noreferrer">Data</a>, <a href={layer.doc} target="_blank" rel="noreferrer">documentation</a>
+    </p>
+  </div>;
+}
+
+function fmtVal(id: string, v: number | null) {
+  if (v === null) return "no data";
+  if (id === "elev") return `${Math.round(v).toLocaleString("en-US")} m`;
+  if (id === "slope") return `${v.toFixed(1)}°`;
+  if (id === "albedo") return v.toFixed(3);
+  if (v === 0) return "0.00";
+  return `${v > 0 ? "+" : ""}${v.toFixed(2)} (${v > 0 ? "consistent" : "inconsistent"} with ice)`;
+}
+
+export function Globe({ onExplore, hidden }: {
+  /** hidden = a surface site is open: the globe stays mounted (state, textures, geometry kept) but paused. */
+  onExplore: (base: string) => void; hidden: boolean;
+}) {
+  const controls = useRef<OrbitControlsImpl>(null);
+  const [meta, setMeta] = useState<GlobeMeta | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [attempt, setAttempt] = useState(0);
+  const [scalars, setScalars] = useState<Scalars>({});
+  const [baseId, setBaseId] = useState("viking");
+  const [overlayId, setOverlayId] = useState<string | null>(null);
+  const [opacity, setOpacity] = useState(0.75);
+  const [exag, setExag] = useState(1);
+  const [shaded, setShaded] = useState(false);
+  const [showGrid, setShowGrid] = useState(true);
+  const [showSites, setShowSites] = useState(true);
+  const [hover, setHover] = useState<Pick | null>(null);
+  const [pick, setPick] = useState<Pick | null>(null);
+  const [site, setSite] = useState<Site | null>(null);
+  const [flyTo, setFlyTo] = useState<(Pick & { dist: number }) | null>(null);
+  const [rotating, setRotating] = useState(() => typeof window !== "undefined" && !window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+
+  useEffect(() => {
+    let active = true;
+    setError(null);
+    loadGlobeMeta().then(async (m) => {
+      if (!active) return;
+      setMeta(m);
+      // Elevation first (shapes the globe), then the other readout grids in the background.
+      for (const def of [...m.scalars].sort((a) => (a.id === "elev" ? -1 : 1))) {
+        try {
+          const g = await loadScalar(m, def);
+          if (active) setScalars((s) => ({ ...s, [def.id]: g }));
+        } catch (e) { console.warn(e); }
+      }
+    }).catch((e) => active && setError(String(e.message ?? e)));
+    return () => { active = false; };
+  }, [attempt]);
+
+  const R = meta?.frame.radius_m ?? 3396190;
+  const elev = scalars.elev;
+  const geometry = useMemo(() => buildPlanet(elev, exag, R), [elev, exag, R]);
+  useEffect(() => () => geometry.dispose(), [geometry]);
+
+  const base = meta?.layers.find((l) => l.id === baseId);
+  const overlay = meta?.layers.find((l) => l.id === overlayId) ?? null;
+  const legendLayer = overlay ?? (base?.legend ? base : null);
+  const readAt = pick ?? hover;
+
+  const tile = meta?.jezero_tile.bounds_deg;
+  const tileOutline = useMemo<[number, number][]>(() => tile ? [
+    [tile.north, tile.west], [tile.north, tile.east], [tile.south, tile.east], [tile.south, tile.west], [tile.north, tile.west],
+  ] : [], [tile]);
+  const traverse = useMemo<[number, number][]>(() => meta?.m20_traverse.points.map(([a, b]) => [a, b]) ?? [], [meta]);
+
+  const startCam = useMemo(() => {
+    const [x, y, z] = latLonToUnit(15, 70);
+    return [x * 5.8, y * 5.8, z * 5.8] as [number, number, number];
+  }, []);
+
+  const zoom = (f: number) => {
+    const o = controls.current; if (!o) return;
+    o.object.position.multiplyScalar(f).clampLength(S * 1.02, 9); o.update();
+  };
+  const rotate = (d: number) => {
+    const o = controls.current; if (!o) return;
+    o.setAzimuthalAngle(o.getAzimuthalAngle() + d); o.update();
+  };
+  // Descent: the camera flight and the site build run in parallel; open the site once both are finished.
+  const [arrived, setArrived] = useState(false);
+  const [openBase, setOpenBase] = useState<string | null>(null);
+  const [landing, setLanding] = useState<Landing | null>(null);
+  const landToken = useRef(0);
+  const target = useRef<Pick | null>(null);
+  const opened = useRef(false);     // hand over to the surface view exactly once per landing
+  const orbitDist = useRef(5.2);    // camera distance before the descent: returns and failures climb back to it
+  const rememberOrbit = () => {
+    const d = controls.current?.object.position.length();
+    if (d) orbitDist.current = Math.max(d, S * 1.6);
+  };
+  useEffect(() => {
+    if (arrived && openBase && !opened.current) { opened.current = true; onExplore(openBase); }
+  }, [arrived, openBase, onExplore]);
+  // Veil: fades in during the last part of a descent, stays while the site builds, fades out on ascent/error.
+  const [descentE, setDescentE] = useState(0);
+  const [descending, setDescending] = useState(false);
+  const [returning, setReturning] = useState(false);
+  const onFlightProgress = useCallback((e: number) => {
+    setDescentE((v) => (Math.abs(v - e) > 0.03 || e === 1 ? e : v));
+  }, []);
+  // "Back to Mars": the globe was paused just above the site with the veil up. Reset the landing state and
+  // climb back to orbit while the veil fades.
+  const wasHidden = useRef(false);
+  useEffect(() => {
+    if (hidden) { wasHidden.current = true; return; }
+    if (!wasHidden.current) return;
+    wasHidden.current = false;
+    landToken.current++;
+    setReturning(true); setDescending(false); setArrived(false); setOpenBase(null); setLanding(null); setDescentE(0);
+    const t = target.current ?? JEZERO;
+    setFlyTo({ lat: t.lat, lon: t.lon, dist: orbitDist.current });
+    const id = setTimeout(() => setReturning(false), 120);
+    return () => clearTimeout(id);
+  }, [hidden]);
+  // Background prefetch: build the selected point while the user is still reading the card.
+  const [size, setSize] = useState<number>(20);
+  useEffect(() => {
+    if (hidden || !pick || Math.abs(pick.lat) > MAX_LAT) return;
+    const id = setTimeout(() => prefetchSite(pick.lat, pick.lon, size), 600);
+    return () => clearTimeout(id);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pick, size]);
+  useEffect(() => () => { landToken.current++; }, []);
+  const explore = useCallback(() => {
+    landToken.current++; setLanding(null); setArrived(false); setRotating(false);
+    opened.current = false; rememberOrbit();
+    target.current = JEZERO; setDescending(true); setDescentE(0);
+    setOpenBase("/terrain/jezero"); setFlyTo({ ...JEZERO, dist: S * 1.035 });
+  }, []);
+  const land = useCallback((p: Pick, size: number) => {
+    const token = ++landToken.current;
+    opened.current = false; rememberOrbit();
+    setArrived(false); setOpenBase(null); setRotating(false);
+    setLanding({ lat: p.lat, lon: p.lon, size, status: "requesting", stage: "requesting" });
+    target.current = p; setDescending(true); setDescentE(0);
+    setFlyTo({ lat: p.lat, lon: p.lon, dist: S * 1.035 });
+    requestSite(p.lat, p.lon, size, (u) => { if (landToken.current === token) setLanding((l) => l && { ...l, ...u }); },
+      () => landToken.current !== token)
+      .then((st) => {
+        if (landToken.current !== token) return;
+        if (st.status === "done") setOpenBase(st.base);
+        else { setOpenBase(null); setDescending(false); setFlyTo({ lat: p.lat, lon: p.lon, dist: orbitDist.current }); }
+      })
+      .catch((e) => {
+        if (landToken.current !== token) return;
+        setLanding((l) => l && { ...l, status: "error", error: String(e.message ?? e) });
+        setOpenBase(null); setDescending(false);
+        setFlyTo({ lat: p.lat, lon: p.lon, dist: orbitDist.current });   // climb back to where the user was
+      });
+  }, []);
+  const onArrive = useCallback(() => { setFlyTo(null); setArrived(true); }, []);
+  const inTile = (p: Pick | null) => !!(p && tile && p.lat >= tile.south && p.lat <= tile.north && p.lon >= tile.west && p.lon <= tile.east);
+  const busy = !!flyTo || !!(landing && (landing.status === "requesting" || landing.status === "queued" || landing.status === "running"));
+  const busyRef = useRef(false);   // read by canvas event handlers: no selection changes during a flight/landing
+  busyRef.current = busy || descending;
+
+  const bases = meta?.layers.filter((l) => l.kind === "base") ?? [];
+  const overlays = meta?.layers.filter((l) => l.kind === "overlay") ?? [];
+  const checksOk = meta?.validation.every((c) => c.ok);
+
+  return <main className="sheet orbital-view" style={hidden ? { visibility: "hidden" } : undefined} aria-hidden={hidden}>
+    <div className="planet-stage" role="img" aria-label="Interactive 3D Mars globe with NASA data layers. Drag to rotate, scroll or pinch to zoom.">
+      <Canvas camera={{ position: startCam, fov: 42, near: 0.001, far: 200 }} dpr={[1, 2]}
+        frameloop={hidden ? "never" : "always"}
+        fallback={<div className="globe-status">WebGL is unavailable.</div>}>
+        <ambientLight intensity={shaded ? 0.35 : 1} />
+        <directionalLight position={[-3, 4, 5]} intensity={shaded ? 2.4 : 0} />
+        <Stars radius={80} depth={30} count={1800} factor={2} saturation={0} fade speed={0} />
+        {meta && base && <Suspense fallback={null}>
+          <Surface geometry={geometry} base={base} overlay={overlay} opacity={opacity} shaded={shaded} />
+        </Suspense>}
+        {meta && showGrid && <Graticule elev={elev} exag={exag} R={R} />}
+        {meta && showSites && meta.sites.map((s) =>
+          <SiteMarker key={s.id} site={s} elev={elev} exag={exag} R={R} selected={site?.id === s.id}
+            onSelect={(x) => { if (busyRef.current) return; setSite(x); setPick({ lat: x.lat, lon: x.lon }); }} />)}
+        {meta && <>
+          <SurfaceLine pts={tileOutline} color="#ef476f" elev={elev} exag={exag} R={R} lift={0.0004} />
+          <SurfaceLine pts={traverse} color="#ffd166" elev={elev} exag={exag} R={R} lift={0.0003} />
+        </>}
+        <Picker elev={elev} exag={exag} R={R} onHover={setHover}
+          onPick={(p) => { if (busyRef.current) return; setPick(p); setSite(null); }} />
+        <CameraDirector controls={controls} flyTo={flyTo} onArrive={onArrive} onProgress={onFlightProgress} />
+        <OrbitControls ref={controls} enablePan={false} minDistance={S * 1.02} maxDistance={9}
+          enabled={!flyTo} autoRotate={rotating && !!meta && !flyTo} autoRotateSpeed={0.25}
+          enableDamping dampingFactor={0.06} />
+      </Canvas>
+    </div>
+
+    <header className="sheet-head">
+      <a className="wordmark" href="#" onClick={(e) => { e.preventDefault(); controls.current?.reset(); }}>RED ATLAS</a>
+      <span className="sheet-name">Science globe</span>
+      <span className="sheet-datum">Planetocentric latitude, east-positive longitude</span>
+      <span className={`checks${!meta || checksOk ? "" : " bad"}`} title={meta?.validation.map((c) => `${c.ok ? "Pass" : "FAIL"}: ${c.check}`).join("\n")}>
+        {meta ? `${meta.validation.filter((c) => c.ok).length} of ${meta.validation.length} data checks passed` : "Loading"}
+      </span>
+    </header>
+
+    <section className="col col-left">
+      <div className="title-block">
+        <h1>Mars</h1>
+        <p>Where could humans live and work?</p>
+      </div>
+      <fieldset className="group">
+        <legend>Base map</legend>
+        {bases.map((l) => <label key={l.id} className="radio">
+          <input type="radio" name="base" checked={baseId === l.id} onChange={() => setBaseId(l.id)} /> {l.name}
+        </label>)}
+      </fieldset>
+      <fieldset className="group">
+        <legend>Science overlay</legend>
+        <label className="radio"><input type="radio" name="ovl" checked={!overlayId} onChange={() => setOverlayId(null)} /> None</label>
+        {overlays.map((l) => <label key={l.id} className="radio">
+          <input type="radio" name="ovl" checked={overlayId === l.id} onChange={() => setOverlayId(l.id)} /> {l.name}
+        </label>)}
+        {overlay && <label className="slider">Opacity <b>{Math.round(opacity * 100)}%</b>
+          <input type="range" min={0.1} max={1} step={0.05} value={opacity} onChange={(e) => setOpacity(+e.target.value)} />
+        </label>}
+      </fieldset>
+      <fieldset className="group">
+        <legend>Display</legend>
+        <label className="check"><input type="checkbox" checked={showGrid} onChange={(e) => setShowGrid(e.target.checked)} /> 30° graticule (0° meridian highlighted)</label>
+        <label className="check"><input type="checkbox" checked={showSites} onChange={(e) => setShowSites(e.target.checked)} /> NASA landing sites</label>
+        <label className="check"><input type="checkbox" checked={shaded} onChange={(e) => setShaded(e.target.checked)} /> Sun shading (visual only)</label>
+        <label className="slider">Relief exaggeration <b>{exag}×</b>{exag !== 1 && <span className="warn"> not true scale</span>}
+          <input type="range" min={1} max={30} step={1} value={exag} onChange={(e) => setExag(+e.target.value)} />
+        </label>
+      </fieldset>
+      {(overlay ?? base) && <LayerInfo layer={(overlay ?? base)!} />}
+    </section>
+
+    <aside className="col col-right">
+      <section className="block">
+        <div className="block-head"><h2>{pick ? "Selected point" : "Cursor"}</h2>
+          {pick && <button className="link" disabled={busy} onClick={() => { setPick(null); setSite(null); }}>Clear</button>}</div>
+        {readAt ? <>
+          <p className="coords">{fmtLat(readAt.lat)}, {fmtLonE(readAt.lon)}</p>
+          <table className="values"><tbody>
+            {meta?.scalars.map((d) => {
+              const masked = d.mask_above_elev_m !== undefined && elev
+                && (elev.at(readAt.lat, readAt.lon) ?? -Infinity) > d.mask_above_elev_m;
+              return <tr key={d.id} title={d.note} className={masked ? "masked" : undefined}>
+                <td>{d.label}</td>
+                <td>{!scalars[d.id] ? "loading"
+                  : masked ? `masked (terrain > +${d.mask_above_elev_m! / 1000} km, as in SWIM products)`
+                  : fmtVal(d.id, scalars[d.id].at(readAt.lat, readAt.lon))}</td>
+              </tr>;
+            })}
+          </tbody></table>
+          <p className="note">Values from 0.125° cells (≈7.4 km). Elevation above the MOLA areoid.</p>
+        </> : <p className="muted">Hover or click the globe to read the NASA data at that point.</p>}
+      </section>
+
+      {site && <section className="block" key={site.id}>
+        <div className="block-head"><h2>Landing site</h2><span className="muted small">{site.year}</span></div>
+        <h3 className="feature">{site.name}</h3>
+        <p>{fmtLat(site.lat)}, {fmtLonE(site.lon)}</p>
+        <p className="muted">MOLA elevation ≈ {site.mola_elev_m.toLocaleString("en-US")} m{site.note ? `. ${site.note}` : ""}</p>
+        <p className="muted small">Source: <a href={site.url} target="_blank" rel="noreferrer">{site.source}</a></p>
+      </section>}
+
+      {pick && <LandCard point={pick} inHiRISE={inTile(pick)} busy={busy} size={size} setSize={setSize}
+        landing={landing && landing.lat === pick.lat && landing.lon === pick.lon ? landing : null}
+        onLand={(size) => land(pick, size)} onHiRISE={explore} />}
+
+      <section className="block">
+        <div className="block-head"><h2>High-resolution site</h2><span className="muted small">HiRISE, 1 m</span></div>
+        <h3 className="feature">Jezero Crater</h3>
+        <p>{fmtLat(JEZERO.lat)}, {fmtLonE(JEZERO.lon)}</p>
+        <p className="muted">Fly down to the western delta front: 3D terrain from the HiRISE 1 m DTM and 25 cm imagery. On the globe, the red box is the tile and the yellow line is the Perseverance traverse (NASA waypoints).</p>
+        <button className="primary" onClick={explore} disabled={!!flyTo}>{flyTo ? "Descending" : "Explore terrain"}</button>
+      </section>
+    </aside>
+
+    {!meta && <div className="globe-status" role="status" aria-live="polite">
+      {error ? <><p>{error}</p><button onClick={() => setAttempt((v) => v + 1)}>Retry</button></>
+             : <><span className="loading-dot" />Loading NASA Mars data layers</>}
+    </div>}
+
+    <footer className="sheet-foot">
+      {legendLayer ? <Legend layer={legendLayer} /> : <div className="basemap-credit">
+        {base && <><b>Base map</b> {base.mission}, {base.product}</>}</div>}
+      <div className="map-tools" aria-label="Globe controls">
+        <span className="hint">Drag to orbit, scroll to zoom, click to inspect</span>
+        <div className="tool-buttons">
+          <button aria-label="Rotate globe left" onClick={() => rotate(0.25)}>←</button>
+          <button aria-label="Rotate globe right" onClick={() => rotate(-0.25)}>→</button>
+          <button aria-label="Zoom in" onClick={() => zoom(0.85)}>+</button>
+          <button aria-label="Zoom out" onClick={() => zoom(1.18)}>−</button>
+          <button aria-pressed={rotating} onClick={() => setRotating(!rotating)}>{rotating ? "Pause rotation" : "Resume rotation"}</button>
+          <button onClick={() => controls.current?.reset()}>Reset view</button>
+        </div>
+      </div>
+    </footer>
+    {(() => {
+      // Veil opacity: smoothstep over the last 45 % of the descent; fully on while waiting for the build.
+      const k = Math.min(1, Math.max(0, (descentE - 0.55) / 0.45));
+      const descentVeil = descending ? (arrived ? 1 : k * k * (3 - 2 * k)) : 0;
+      const op = Math.max(descentVeil, returning ? 1 : 0);
+      const waiting = descending && arrived && !openBase;
+      const lbl = landing && landing.status !== "error"
+        ? (STAGE_LABEL[landing.stage ?? "queued"] ?? landing.stage) : "Descending";
+      return <Veil opacity={op} label={returning ? "Returning to orbit" : waiting || descentVeil > 0.6 ? lbl : undefined}
+        progress={returning ? null : landing ? overallProgress(landing) : openBase ? null : undefined}
+        sub={landing && !returning ? `${landing.size} km site at ${fmtLat(landing.lat)}, ${fmtLonE(landing.lon)}` : undefined} />;
+    })()}
+  </main>;
+}
