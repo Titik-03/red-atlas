@@ -28,6 +28,10 @@ async function requestSite(lat: number, lon: number, size: number, onUpdate: (l:
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ lat, lon, size_km: size }),
   }).catch(() => null);
+  if (r?.status === 503) {   // the dev server knows why the builder is down (no Python environment, crashed, ...)
+    const why = await r.json().catch(() => null);
+    if (why?.error) throw new Error(why.error);
+  }
   if (!r || r.status === 404 || r.status >= 500)
     throw new Error("The site builder is not responding. Restart `npm run dev` (it starts the builder automatically) and try again.");
   let st = await r.json();
