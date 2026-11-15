@@ -11,10 +11,16 @@ export interface LayerDef {
   units?: string; min?: number; max?: number; legend?: string[];
   description: string; mission: string; instrument: string; product: string;
   source: string; url: string; doc: string; derived?: boolean;
+  /** What kind of data this is (measured, reanalysis, ...); set by build_climate.py. */
+  data_kind?: string;
 }
 export interface ScalarDef {
   id: string; file: string; scale: number; units: string; label: string; note: string;
   mask_above_elev_m?: number;
+  /** Grid size when it differs from meta.grid (the climate grids are 1 degree). */
+  width?: number; height?: number;
+  /** false = helper grid (wind components), not shown as a readout row. */
+  readout?: boolean;
 }
 export interface Site {
   id: string; name: string; year: number; lat: number; lon: number; lon_e: number;
@@ -28,6 +34,8 @@ export interface GlobeMeta {
   m20_traverse: { points: [number, number, number][]; source: string; layer_name: string };
   validation: { ok: boolean; check: string }[];
   generated_utc: string;
+  /** Period of the climate layers (dust, temperature, wind); absent when build_climate.py has not been run. */
+  climate_period?: string;
 }
 
 export const GLOBE_BASE = "/globe";
@@ -45,7 +53,7 @@ export function unitToLatLon(x: number, y: number, z: number) {
 
 export class ScalarGrid {
   constructor(public def: ScalarDef, private data: Int16Array, private w: number, private h: number, private nodata: number) {}
-  /** Value of the 0.125-degree cell containing (lat, lon), in physical units; null where no data. */
+  /** Value of the grid cell containing (lat, lon), in physical units; null where no data. */
   at(lat: number, lon: number): number | null {
     const lo = ((((lon + 180) % 360) + 360) % 360);
     const c = Math.min(Math.floor((lo / 360) * this.w), this.w - 1);
@@ -67,24 +75,65 @@ export class ScalarGrid {
   }
 }
 
-export async function loadGlobeMeta(): Promise<GlobeMeta> {
+let metaCache: Promise<GlobeMeta> | null = null;
+const scalarCache = new Map<string, Promise<ScalarGrid>>();
+
+/** Cached: the globe and the surface view share one copy of the metadata and of each readout grid. */
+export function loadGlobeMeta(): Promise<GlobeMeta> {
+  metaCache ??= fetchGlobeMeta().catch((e) => { metaCache = null; throw e; });
+  return metaCache;
+}
+
+async function fetchGlobeMeta(): Promise<GlobeMeta> {
   const res = await fetch(`${GLOBE_BASE}/globe.json`);
   const text = await res.text();
   if (!res.ok || text.trimStart().startsWith("<"))
     throw new Error("globe.json not found. Build it first: `.venv/bin/python pipeline/build_globe.py`.");
-  return JSON.parse(text);
+  const meta: GlobeMeta = JSON.parse(text);
+  // Optional climate layers (pipeline/build_climate.py). They are rebuilt per computer, so they may be absent.
+  const c = await fetch(`${GLOBE_BASE}/climate.json`).then((r) => (r.ok ? r.text() : "")).catch(() => "");
+  if (c && !c.trimStart().startsWith("<")) {
+    const clim = JSON.parse(c);
+    meta.layers.push(...clim.layers);
+    meta.scalars.push(...clim.scalars);
+    meta.validation.push(...clim.validation);
+    meta.climate_period = clim.period;
+  }
+  return meta;
 }
 
-export async function loadScalar(meta: GlobeMeta, def: ScalarDef): Promise<ScalarGrid> {
+export function loadScalar(meta: GlobeMeta, def: ScalarDef): Promise<ScalarGrid> {
+  let p = scalarCache.get(def.id);
+  if (!p) {
+    p = fetchScalar(meta, def).catch((e) => { scalarCache.delete(def.id); throw e; });
+    scalarCache.set(def.id, p);
+  }
+  return p;
+}
+
+async function fetchScalar(meta: GlobeMeta, def: ScalarDef): Promise<ScalarGrid> {
   const res = await fetch(`${GLOBE_BASE}/${def.file}`);
   if (!res.ok) throw new Error(`${def.file}: HTTP ${res.status}`);
   const buf = await res.arrayBuffer();
-  const n = meta.grid.width * meta.grid.height;
+  const w = def.width ?? meta.grid.width, h = def.height ?? meta.grid.height;
+  const n = w * h;
   if (buf.byteLength !== n * 2) throw new Error(`${def.file}: ${buf.byteLength} bytes, expected ${n * 2}`);
   const dv = new DataView(buf), out = new Int16Array(n);
   for (let i = 0; i < n; i++) out[i] = dv.getInt16(i * 2, true);
-  return new ScalarGrid(def, out, meta.grid.width, meta.grid.height, meta.grid.nodata);
+  return new ScalarGrid(def, out, w, h, meta.grid.nodata);
 }
 
 export const fmtLat = (v: number) => `${Math.abs(v).toFixed(3)}° ${v >= 0 ? "N" : "S"}`;
 export const fmtLonE = (v: number) => `${(((v % 360) + 360) % 360).toFixed(3)}° E`;
+
+/** Readout text for one scalar value (shared by the globe and the surface view). */
+export function fmtVal(id: string, v: number | null) {
+  if (v === null) return "no data";
+  if (id === "elev") return `${Math.round(v).toLocaleString("en-US")} m`;
+  if (id === "slope") return `${v.toFixed(1)}°`;
+  if (id === "albedo" || id === "dust") return v.toFixed(3);
+  if (id.startsWith("temp")) return `${v.toFixed(0)} K (${(v - 273.15).toFixed(0)} °C)`;
+  if (id === "wind") return `${v.toFixed(1)} m/s`;
+  if (v === 0) return "0.00";
+  return `${v > 0 ? "+" : ""}${v.toFixed(2)} (${v > 0 ? "consistent" : "inconsistent"} with ice)`;
+}

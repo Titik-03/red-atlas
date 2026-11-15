@@ -248,6 +248,7 @@ def build_hirise(cfg):
     (out_web / "meta.json").write_text(json.dumps(meta, indent=2))
     add_context(cfg, out_web)
     add_color(cfg, out_web)
+    add_thermal(cfg, out_web)
     print(f"\nWrote {out_web}/heightmap.bin, texture.jpg, context.*, meta.json")
     return out_web
 
@@ -867,6 +868,10 @@ def build_global(cfg, lat_c, lon_c, size_km, out_web, progress=lambda stage, fra
     ctx_pool.shutdown()
     (tmp / "meta.json").write_text(json.dumps(meta, indent=2))
     add_color(cfg, tmp)
+    try:
+        add_thermal(cfg, tmp)
+    except SiteError as e:               # the thermal layers are optional: never fail a site for them
+        print(f"  [warn] no thermal layers: {e}")
     shutil.rmtree(out_web, ignore_errors=True)
     tmp.rename(out_web)
     progress("done", 1.0)
@@ -1032,6 +1037,99 @@ def add_color(cfg, site_dir):
     return meta["color"]
 
 
+# THEMIS infrared mosaics (Mars Odyssey, ASU Mars Space Flight Facility; hosted by USGS), 100 m/px.
+# Facts from the PDS3/ISIS labels next to the files: 8-bit, uncompressed, one row per strip, simple cylindrical on the
+# R = 3396190 m sphere, centre longitude 180 (so column 0 is 0 deg E), image data from byte ^IMAGE (1-based).
+# The DN are RELATIVE brightness (the mosaics are normalised and blended), not calibrated temperatures.
+THEMIS_BASE = "https://asc-pds-services.s3.us-west-2.amazonaws.com/mosaic/"
+THEMIS = {
+    "night": {"file": "Mars_MO_THEMIS-IR-Night_mosaic_60N60S_100m_v14.tif", "product": "thm_night_ir_v14",
+              "width": 213388, "height": 71130, "start_byte": 1138870, "x0": -10669400.0, "y0": 3556500.0},
+    "day": {"file": "Mars_MO_THEMIS-IR-Day_mosaic_global_100m_v12.tif", "product": "thm_day_ir_v12",
+            "width": 213390, "height": 106696, "start_byte": 1707926, "x0": -10669500.0, "y0": 5334800.0},
+}
+THERMAL_N = 256
+
+
+def add_thermal(cfg, site_dir):
+    """Write ir_night.u8 / ir_day.u8 (THERMAL_N x THERMAL_N bytes, row 0 = north, 0 = no data): the THEMIS night and
+    day infrared mosaics over the site, in the site's local frame. Only the site's window is fetched (HTTP ranges).
+    Night IR is the measured basis of the "ground dust and fines" filter (fine dust cools fast and is dark at
+    night, rock stays warm and is bright); day and night IR give the relative temperature pattern."""
+    site_dir = Path(site_dir)
+    if not (site_dir / "meta.json").exists():        # unfinished or leftover folder
+        return
+    meta = json.loads((site_dir / "meta.json").read_text())
+    R = float(cfg["body"]["radius_m"])
+    ext, la0, lo0 = meta["extent_m"], meta["center"]["lat"], meta["center"]["lon"]
+    n = THERMAL_N
+    xs = ext["west"] + (np.arange(n) + 0.5) * (ext["east"] - ext["west"]) / n
+    ys = ext["north"] - (np.arange(n) + 0.5) * (ext["north"] - ext["south"]) / n
+    lat = la0 + np.degrees(ys / R)                                             # same formulas as the browser
+    lon = (lo0 % 360) + np.degrees(xs / (R * math.cos(math.radians(la0))))     # unwrapped around the site centre
+    out = {}
+    for key, t in THEMIS.items():
+        url = THEMIS_BASE + t["file"]
+        fr = (t["y0"] - R * np.radians(lat)) / 100.0 - 0.5
+        fc = (R * np.radians(lon - 180.0) - t["x0"]) / 100.0 - 0.5
+        r0, r1 = int(math.floor(fr.min())), int(math.floor(fr.max())) + 1
+        c0, c1 = int(math.floor(fc.min())), int(math.floor(fc.max())) + 1
+        if r0 < 0 or r1 > t["height"] - 1:
+            print(f"  thermal {key}: site is outside the mosaic's latitude range, skipped")
+            continue
+        H, W = r1 - r0 + 1, c1 - c0 + 1
+        with rasterio.open("/vsicurl/" + url) as src:
+            g = src.transform
+            if (src.width, src.height, src.dtypes[0], src.compression) != (t["width"], t["height"], "uint8", None) \
+                    or src.block_shapes[0] != (1, t["width"]) or abs(g.c - t["x0"]) > 1e-6 or abs(g.f - t["y0"]) > 1e-6 \
+                    or abs(g.a - 100) > 1e-9 or "+lon_0=180" not in src.crs.to_proj4() or "+R=3396190" not in src.crs.to_proj4():
+                fail(f"thermal {key}: file header differs from the documented values")
+            segs = col_segments(c0, W, t["width"])        # wraps at 0/360 deg E
+            arr = np.empty((H, W), np.uint8)
+
+            def rd(i):
+                parts = []
+                for fcol, cnt in segs:
+                    off = t["start_byte"] - 1 + (r0 + i) * t["width"] + fcol
+                    st, body = http_get(url, headers={"Range": f"bytes={off}-{off + cnt - 1}"})
+                    if st != 206 or len(body) != cnt:
+                        fail(f"thermal {key}: range read returned HTTP {st}, {len(body)} bytes")
+                    parts.append(np.frombuffer(body, np.uint8))
+                arr[i] = np.concatenate(parts)
+            list(HTTP_POOL.map(rd, range(H)))
+            ref = src.read(1, window=Window(segs[0][0], r0 + H // 2, segs[0][1], 1))[0]
+        if not np.array_equal(ref, arr[H // 2, :segs[0][1]]):
+            fail(f"thermal {key}: byte-range read disagrees with GDAL's read (label offset wrong?)")
+        # Bilinear onto the site grid, ignoring no-data (0) neighbours.
+        rr, cc = fr[:, None] - r0, fc[None, :] - c0
+        i0, j0 = np.clip(np.floor(rr).astype(int), 0, H - 2), np.clip(np.floor(cc).astype(int), 0, W - 2)
+        tr, tc = np.clip(rr - i0, 0, 1), np.clip(cc - j0, 0, 1)
+        acc, wsum = np.zeros((n, n)), np.zeros((n, n))
+        for di, dj, w in ((0, 0, (1 - tr) * (1 - tc)), (0, 1, (1 - tr) * tc), (1, 0, tr * (1 - tc)), (1, 1, tr * tc)):
+            v = arr[i0 + di, j0 + dj].astype(np.float64)
+            acc += np.where(v > 0, v * w, 0)
+            wsum += np.where(v > 0, w, 0)
+        res = np.where(wsum > 0.25, np.clip(np.round(acc / np.maximum(wsum, 1e-9)), 1, 255), 0).astype(np.uint8)
+        valid = float((res > 0).mean())
+        if valid < 0.5:
+            print(f"  thermal {key}: only {valid:.0%} of the site has data, skipped")
+            continue
+        res.tofile(site_dir / f"ir_{key}.u8")
+        out[key] = {"file": f"ir_{key}.u8", "product": t["product"], "url": url, "valid_fraction": round(valid, 4),
+                    "dn_p2": int(np.percentile(res[res > 0], 2)), "dn_p98": int(np.percentile(res[res > 0], 98))}
+        print(f"  thermal {key}: {H} x {W} px window, {valid:.1%} valid, DN {out[key]['dn_p2']}..{out[key]['dn_p98']} (2-98 %)")
+    if not out:
+        return None
+    meta["thermal"] = {
+        "size": n, "native_m": 100.0, **out,
+        "source": "Mars Odyssey THEMIS infrared mosaics, 100 m (ASU Mars Space Flight Facility; USGS Astrogeology)",
+        "note": ("8-bit relative brightness from normalised, blended mosaics: it shows where the ground is warmer or "
+                 "colder than its surroundings, not a temperature in kelvin."),
+    }
+    (site_dir / "meta.json").write_text(json.dumps(meta, indent=2))
+    return meta["thermal"]
+
+
 def load_cfg(path=None):
     return yaml.safe_load(Path(path or ROOT / "pipeline" / "config.yaml").read_text())
 
@@ -1056,8 +1154,13 @@ def main():
     ap.add_argument("--size", type=int, default=20)
     ap.add_argument("--context-only", metavar="SITE_DIR", help="(re)build only the context ring of a built site")
     ap.add_argument("--color-only", metavar="SITE_DIR", nargs="+", help="(re)build only the Viking colour layers")
+    ap.add_argument("--thermal-only", metavar="SITE_DIR", nargs="+", help="(re)build only the THEMIS infrared layers")
     a = ap.parse_args()
     cfg = load_cfg(a.config)
+    if a.thermal_only:
+        for d in a.thermal_only:
+            print(d, "->", sorted(k for k in (add_thermal(cfg, d) or {}) if k in THEMIS))
+        return
     if a.context_only:
         sys.exit(0 if add_context(cfg, a.context_only) else 1)
     if a.color_only:

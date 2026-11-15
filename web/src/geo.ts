@@ -37,9 +37,14 @@ export interface TerrainMeta {
   sources?: SourceInfo[];
   context?: ContextMeta;
   color?: { file: string | null; context_file: string | null; native_m: number; source: string; method: string };
+  /** THEMIS night/day infrared over the site (100 m, relative brightness); see build_terrain.add_thermal. */
+  thermal?: { size: number; native_m: number; note: string; source: string;
+    night?: ThermalBand; day?: ThermalBand };
   validation: { status?: "pass" | "warn"; checks?: ValidationCheck[] } & Record<string, unknown>;
   generated_utc: string;
 }
+
+export interface ThermalBand { file: string; product: string; url: string; valid_fraction: number; dn_p2: number; dn_p98: number }
 
 export interface ContextMeta {
   heightmap: { file: string; width: number; height: number; spacing_m: number; min: number; max: number };
@@ -52,6 +57,8 @@ export interface Terrain {
   meta: TerrainMeta;
   context?: Float32Array; // low-res surroundings (meta.context), same local frame, row 0 = north
   heights: Float32Array; // row-major, row 0 = north, values in metres at cell centres
+  /** THEMIS infrared DN over the site (size x size, row 0 = north, 0 = no data). */
+  thermal?: { night?: Uint8Array; day?: Uint8Array };
 }
 
 const DEG = 180 / Math.PI;
@@ -162,5 +169,14 @@ export async function loadTerrain(base: string, onProgress?: (f: number) => void
       for (let i = 0; i < context.length; i++) context[i] = cv.getFloat32(i * 4, true);
     }
   }
-  return { meta, heights, context };
+  // Optional THEMIS infrared layers (local dust and temperature patterns).
+  const thermal: Terrain["thermal"] = {};
+  for (const k of ["night", "day"] as const) {
+    const band = meta.thermal?.[k];
+    if (!band) continue;
+    const r = await fetch(`${base}/${band.file}`).catch(() => null);
+    const ab = r && r.ok ? await r.arrayBuffer() : null;
+    if (ab && ab.byteLength === meta.thermal!.size ** 2) thermal[k] = new Uint8Array(ab);
+  }
+  return { meta, heights, context, thermal };
 }

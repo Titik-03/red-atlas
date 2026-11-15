@@ -175,5 +175,27 @@
     "native_m": 925.4,
     "source": "USGS Viking Orbiter colour mosaic Mars_Viking_ClrMosaic_global_925m (same as the globe base map)",
     "method": "colour fusion in the viewer: Viking colour x (image / image averaged over ~925 m); brightness detail from the grayscale image, colour from Viking. Visual product, not a measured colour at the image resolution."
+  },
+  "thermal": {
+    "size": 256,
+    "native_m": 100.0,
+    "night": {
+      "file": "ir_night.u8",
+      "product": "thm_night_ir_v14",
+      "url": "https://asc-pds-services.s3.us-west-2.amazonaws.com/mosaic/Mars_MO_THEMIS-IR-Night_mosaic_60N60S_100m_v14.tif",
+      "valid_fraction": 1.0,
+      "dn_p2": 69,
+      "dn_p98": 146
+    },
+    "day": {
+      "file": "ir_day.u8",
+      "product": "thm_day_ir_v12",
+      "url": "https://asc-pds-services.s3.us-west-2.amazonaws.com/mosaic/Mars_MO_THEMIS-IR-Day_mosaic_global_100m_v12.tif",
+      "valid_fraction": 1.0,
+      "dn_p2": 129,
+      "dn_p98": 187
+    },
+    "source": "Mars Odyssey THEMIS infrared mosaics, 100 m (ASU Mars Space Flight Facility; USGS Astrogeology)",
+    "note": "8-bit relative brightness from normalised, blended mosaics: it shows where the ground is warmer or colder than its surroundings, not a temperature in kelvin."
   }
 }

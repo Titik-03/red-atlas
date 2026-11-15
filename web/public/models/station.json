@@ -1,0 +1,73 @@
+{
+  "note": "Team model (Blender export, metres, +Y up, ground at y = 0, station centred near the origin).",
+  "scale": 1,
+  "rotation_y_deg": 0,
+  "y_offset_m": 0,
+  "hide": [
+    "Mars_Terrain",
+    "Cube",
+    "Terrain_Features"
+  ],
+  "footprint_m": 40,
+  "seat": [
+    "CARGO-CNT-01",
+    "CARGO-CNT-02",
+    "CARGO-CNT-03",
+    "CARGO-TV-01_Transporter",
+    "ROVER-UT-01_Utility",
+    "ENV-STATION-01",
+    "Floodlight_Tripod",
+    "MaintenanceBench",
+    "ElectricalSkid"
+  ],
+  "rover": "ROVER-PR-01_Pressurised",
+  "airlock_exit": [
+    -5.5,
+    11.0
+  ],
+  "base_walk": [
+    [
+      -5.5,
+      11.0,
+      0
+    ],
+    [
+      -13.5,
+      13.2,
+      1
+    ],
+    [
+      4.5,
+      12.6,
+      1
+    ]
+  ],
+  "_notes": "Coordinates are in the model's own frame, metres: [x, z]. seat = parts set on the ground one by one. rover = the part that drives on trips. airlock_exit = where a walk starts. base_walk = loop of the second astronaut ([x, z, 1 = work here]). obstacles = [x, z, radius] circles that routes go around.",
+  "obstacles": [
+    [
+      0,
+      0,
+      9.5
+    ],
+    [
+      2,
+      8,
+      4.5
+    ],
+    [
+      11,
+      13.5,
+      9
+    ],
+    [
+      -17.5,
+      16.5,
+      4.5
+    ],
+    [
+      -12.5,
+      8.5,
+      4.5
+    ]
+  ]
+}

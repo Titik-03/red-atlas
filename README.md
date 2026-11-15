@@ -30,9 +30,11 @@ Every 3D view, Jezero included, sits inside a wider, lower-resolution **context 
 ## Run
 ```bash
 # 1. Build data assets (both scripts abort if any validation check fails)
-python3 -m venv .venv && .venv/bin/pip install rasterio numpy pyyaml pillow matplotlib cmcrameri
+python3 -m venv .venv && .venv/bin/pip install rasterio numpy pyyaml pillow matplotlib cmcrameri h5py
 .venv/bin/python pipeline/build_terrain.py   # Jezero HiRISE tile (streams ~1.7 GB; writes ~30 MB)
 .venv/bin/python pipeline/build_globe.py     # globe layers (downloads ~1.2 GB to data/raw/globe; ~2.5 min after that)
+.venv/bin/python pipeline/build_climate.py   # dust, temperature and wind filters (~180 MB of downloads, ~5 min).
+                                             # Not in the repository (OpenMARS licence), so run it once per computer.
 .venv/bin/python pipeline/audit.py           # independent accuracy audit of all published values (17 checks)
 
 # 2. Start the viewer. `npm run dev` also starts the "Land here" site server (pipeline/site_server.py on :8765,
@@ -57,7 +59,7 @@ From `web/`, run `node check-globe.mjs` (initial view, reduced motion) and `node
 
 ## Layout
 ```
-pipeline/   config.yaml, build_terrain.py (build_site: hirise_jezero | global), site_server.py, build_globe.py, audit.py
+pipeline/   config.yaml, build_terrain.py (build_site: hirise_jezero | global), site_server.py, build_globe.py, build_climate.py, audit.py
 docs/       DATA_SOURCES.md (data dossier)
 data/raw/docs/  official metadata/labels as downloaded
 data/processed/ local-grid GeoTIFFs (for checking with GIS tools)

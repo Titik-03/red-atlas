@@ -202,5 +202,39 @@ if cm.get("color") and VIK.exists():
 else:
     check(False, "Jezero colour layer missing (run build_terrain.py --color-only web/public/terrain/jezero)")
 
+# ---------- 12. Climate layers (dust, temperature, wind): published 1-degree readout grids re-derived point by point
+# from the reduced product grids with an independent scalar bilinear formula (build_climate.py uses array code).
+CL = ROOT / "data/raw/climate"
+if (WEB / "globe/climate.json").exists() and (CL / "openmars_my30_reduced.npz").exists():
+    cj = json.loads((WEB / "globe/climate.json").read_text())
+    om, du = np.load(CL / "openmars_my30_reduced.npz"), np.load(CL / "dust_my30_reduced.npz")
+    def at_points(a, lat, lon, la, lo):
+        fr = min(max((lat[0] - la) / (lat[0] - lat[1]), 0), len(lat) - 1)
+        fc = ((lo - lon[0]) / (lon[1] - lon[0])) % len(lon)
+        r0, c0 = min(int(fr), len(lat) - 2), int(fc); tr, tc = fr - r0, fc - c0; c1 = (c0 + 1) % len(lon)
+        return a[r0, c0]*(1-tr)*(1-tc) + a[r0, c1]*(1-tr)*tc + a[r0+1, c0]*tr*(1-tc) + a[r0+1, c1]*tr*tc
+    worst = {}
+    for sc in cj["scalars"]:
+        g = np.fromfile(WEB / "globe" / sc["file"], "<i2").reshape(sc["height"], sc["width"]) / sc["scale"]
+        src, lat, lon = {"dust": (du["tot_mean"], du["lat"], du["lon"]), "temp": (om["ts_mean"], om["lat"], om["lon"]),
+                         "temp_min": (om["ts_min"], om["lat"], om["lon"]), "temp_max": (om["ts_max"], om["lat"], om["lon"]),
+                         "wind": (om["spd_mean"], om["lat"], om["lon"]), "wind_u": (om["u_mean"], om["lat"], om["lon"]),
+                         "wind_v": (om["v_mean"], om["lat"], om["lon"])}[sc["id"]]
+        d = 0.0
+        for la, lo in glob_pts:
+            r, c = cell(la, lo, sc["width"], sc["height"])
+            d = max(d, abs(g[r, c] - at_points(src, lat, lon, 90 - (r + 0.5), -180 + (c + 0.5))) * sc["scale"])
+        worst[sc["id"]] = d
+    check(max(worst.values()) <= 0.51, f"Climate readouts (dust, temperature, wind) = product grids interpolated at {len(glob_pts)} points "
+          f"(max error {max(worst.values()):.2f} storage units, i.e. rounding only)")
+    # Known geography as an independent sanity check of the published grids.
+    T = np.fromfile(WEB / "globe/temp.i16", "<i2").reshape(180, 360) / 10
+    D = np.fromfile(WEB / "globe/dust.i16", "<i2").reshape(180, 360) / 10000
+    hellas, tharsis = D[cell(-42, 70, 360, 180)], D[cell(0, -110, 360, 180)]
+    check(T[cell(0, 0, 360, 180)] > T[cell(80, 0, 360, 180)] + 30 and hellas > 1.5 * tharsis,
+          f"Climate geography: equator warmer than 80 N by >30 K; more dust column over Hellas ({hellas:.2f}) than over Tharsis ({tharsis:.2f})")
+else:
+    print("[skip] climate layers not built on this computer (pipeline/build_climate.py)")
+
 print(f"\n{sum(results)}/{len(results)} audit checks passed")
 sys.exit(0 if all(results) else 1)

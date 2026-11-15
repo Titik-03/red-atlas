@@ -22,15 +22,23 @@ const FUSION_CHUNK = /* glsl */ `
   float ratio = clamp( pan.r / max( panLow.r, 0.004 ), 0.15, 4.0 );
   vec3 fused = clamp( vik * ratio, 0.0, 1.0 );
   diffuseColor.rgb *= mix( pan.rgb, fused, uMix );
+  // Filter overlay (elevation, slope, ice, dust, temperature, wind), blended over the image.
+  vec4 ov = texture2D( uOverlay, vMapUv );
+  diffuseColor.rgb = mix( diffuseColor.rgb, ov.rgb, ov.a * uOvMix );
 #endif
 `;
 
+const NO_OVERLAY = new THREE.DataTexture(new Uint8Array(4), 1, 1);
+NO_OVERLAY.needsUpdate = true;
+
 function useFusion(pan: THREE.Texture, color: THREE.Texture | null, pixelM: number, width: number, colorOn: boolean,
-                   urls: string[]) {
+                   urls: string[], overlay: THREE.Texture | null = null, overlayOpacity = 0) {
   const uniforms = useMemo(() => ({
-    uColor: { value: color },
+    uColor: { value: color ?? pan },
+    uOverlay: { value: NO_OVERLAY as THREE.Texture },
+    uOvMix: { value: 0 },
     uLod: { value: Math.max(0, Math.min(Math.log2(width), Math.log2(VIKING_M / pixelM))) },
-    uMix: { value: colorOn ? 1 : 0 },
+    uMix: { value: colorOn && color ? 1 : 0 },
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }), [color, pixelM, width]);
   useEffect(() => {
@@ -48,16 +56,19 @@ function useFusion(pan: THREE.Texture, color: THREE.Texture | null, pixelM: numb
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pan, color]);
-  useFrame((_, dt) => {   // smooth grayscale <-> colour transition
+  useFrame((_, dt) => {   // smooth grayscale <-> colour transition, and filter fade
+    uniforms.uOverlay.value = overlay ?? uniforms.uOverlay.value;
+    const ot = overlay ? overlayOpacity : 0, o = uniforms.uOvMix;
+    if (o.value !== ot) o.value = Math.abs(ot - o.value) < 0.01 ? ot : o.value + (ot - o.value) * Math.min(1, dt * 7);
     const target = colorOn && color ? 1 : 0, u = uniforms.uMix;
     if (u.value !== target) u.value = Math.abs(target - u.value) < 0.02 ? target : u.value + (target - u.value) * Math.min(1, dt * 6);
   });
-  const onBeforeCompile = useMemo(() => color ? (shader: THREE.WebGLProgramParametersWithUniforms) => {
+  const onBeforeCompile = useMemo(() => (shader: THREE.WebGLProgramParametersWithUniforms) => {
     Object.assign(shader.uniforms, uniforms);
-    shader.fragmentShader = "uniform sampler2D uColor;\nuniform float uLod;\nuniform float uMix;\n"
+    shader.fragmentShader = "uniform sampler2D uColor;\nuniform sampler2D uOverlay;\nuniform float uLod;\nuniform float uMix;\nuniform float uOvMix;\n"
       + shader.fragmentShader.replace("#include <map_fragment>", FUSION_CHUNK);
-  } : undefined, [color, uniforms]);
-  return { onBeforeCompile, cacheKey: color ? "viking-fusion" : "plain" };
+  }, [uniforms]);
+  return { onBeforeCompile, cacheKey: "viking-fusion" };
 }
 
 /**
@@ -65,15 +76,17 @@ function useFusion(pan: THREE.Texture, color: THREE.Texture | null, pixelM: numb
  * UVs are computed from each vertex's metric position over the texture extent,
  * so the orthoimage and the DTM align by construction (same grid from the pipeline).
  */
-export function Terrain({ data, base, stride, exaggeration, relief, colorOn }: {
+export function Terrain({ data, base, stride, exaggeration, relief, colorOn, overlay, overlayOpacity }: {
   data: TerrainData; base: string; stride: number; exaggeration: number; relief: boolean; colorOn: boolean;
+  /** Filter colours over the site (see siteFilters.ts); null = none. */
+  overlay: THREE.Texture | null; overlayOpacity: number;
 }) {
   const { meta, heights } = data;
   const cfile = meta.color?.file;
   const urls = cfile ? [`${base}/${meta.texture.file}`, `${base}/${cfile}`] : [`${base}/${meta.texture.file}`];
   const texs = useTexture(urls);
   const tex = texs[0], ctex = texs[1] ?? null;
-  const fusion = useFusion(tex, ctex, meta.texture.pixel_m, meta.texture.width, colorOn, urls);
+  const fusion = useFusion(tex, ctex, meta.texture.pixel_m, meta.texture.width, colorOn, urls, overlay, overlayOpacity);
 
   const geometry = useMemo(() => {
     const { width: W, height: H, spacing_m: d, min } = meta.heightmap;

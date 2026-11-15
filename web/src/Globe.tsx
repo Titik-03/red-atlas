@@ -5,7 +5,7 @@ import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
 import * as THREE from "three";
 import { Veil } from "./Veil";
 import {
-  GLOBE_BASE, fmtLat, fmtLonE, latLonToUnit, loadGlobeMeta, loadScalar, unitToLatLon,
+  GLOBE_BASE, fmtLat, fmtLonE, fmtVal, latLonToUnit, loadGlobeMeta, loadScalar, unitToLatLon,
   type GlobeMeta, type LayerDef, type ScalarGrid, type Site,
 } from "./globeData";
 
@@ -339,8 +339,21 @@ function Legend({ layer }: { layer: LayerDef }) {
   </div>;
 }
 
+/** The six filters. "ice" stands for the three SWIM depth layers; `kind` says what sort of data each one is. */
+const FILTERS = [
+  { id: "mola", name: "Elevation", kind: "Measured (laser altimeter)" },
+  { id: "slope", name: "Slope", kind: "Derived from measured elevation" },
+  { id: "ice", name: "Water ice", kind: "Analysis combining several instruments" },
+  { id: "dust", name: "Dust", kind: "" },
+  { id: "temp", name: "Temperature", kind: "" },
+  { id: "wind", name: "Wind", kind: "" },
+];
+const ICE_DEPTHS: [string, string][] = [["ice_0_1", "0–1 m"], ["ice_1_5", "1–5 m"], ["ice_5", "> 5 m"]];
+
 function LayerInfo({ layer }: { layer: LayerDef }) {
+  const kind = layer.data_kind ?? FILTERS.find((f) => f.id === (layer.id.startsWith("ice") ? "ice" : layer.id))?.kind;
   return <div className="layer-info">
+    {kind && <p className="kind"><b>Data type</b> {kind}</p>}
     <p>{layer.description}</p>
     <p className="muted">
       {layer.mission}, {layer.instrument}, <code>{layer.product}</code><br />
@@ -349,14 +362,6 @@ function LayerInfo({ layer }: { layer: LayerDef }) {
   </div>;
 }
 
-function fmtVal(id: string, v: number | null) {
-  if (v === null) return "no data";
-  if (id === "elev") return `${Math.round(v).toLocaleString("en-US")} m`;
-  if (id === "slope") return `${v.toFixed(1)}°`;
-  if (id === "albedo") return v.toFixed(3);
-  if (v === 0) return "0.00";
-  return `${v > 0 ? "+" : ""}${v.toFixed(2)} (${v > 0 ? "consistent" : "inconsistent"} with ice)`;
-}
 
 export function Globe({ onExplore, hidden }: {
   /** hidden = a surface site is open: the globe stays mounted (state, textures, geometry kept) but paused. */
@@ -367,8 +372,8 @@ export function Globe({ onExplore, hidden }: {
   const [error, setError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
   const [scalars, setScalars] = useState<Scalars>({});
-  const [baseId, setBaseId] = useState("viking");
-  const [overlayId, setOverlayId] = useState<string | null>(null);
+  const [filter, setFilter] = useState<string | null>(null);
+  const [iceDepth, setIceDepth] = useState("ice_0_1");
   const [opacity, setOpacity] = useState(0.75);
   const [exag, setExag] = useState(1);
   const [shaded, setShaded] = useState(false);
@@ -402,7 +407,8 @@ export function Globe({ onExplore, hidden }: {
   const geometry = useMemo(() => buildPlanet(elev, exag, R), [elev, exag, R]);
   useEffect(() => () => geometry.dispose(), [geometry]);
 
-  const base = meta?.layers.find((l) => l.id === baseId);
+  const base = meta?.layers.find((l) => l.id === "viking");
+  const overlayId = filter === "ice" ? iceDepth : filter;
   const overlay = meta?.layers.find((l) => l.id === overlayId) ?? null;
   const legendLayer = overlay ?? (base?.legend ? base : null);
   const readAt = pick ?? hover;
@@ -504,8 +510,6 @@ export function Globe({ onExplore, hidden }: {
   const busyRef = useRef(false);   // read by canvas event handlers: no selection changes during a flight/landing
   busyRef.current = busy || descending;
 
-  const bases = meta?.layers.filter((l) => l.kind === "base") ?? [];
-  const overlays = meta?.layers.filter((l) => l.kind === "overlay") ?? [];
   const checksOk = meta?.validation.every((c) => c.ok);
 
   return <main className="sheet orbital-view" style={hidden ? { visibility: "hidden" } : undefined} aria-hidden={hidden}>
@@ -551,20 +555,23 @@ export function Globe({ onExplore, hidden }: {
         <p>Where could humans live and work?</p>
       </div>
       <fieldset className="group">
-        <legend>Base map</legend>
-        {bases.map((l) => <label key={l.id} className="radio">
-          <input type="radio" name="base" checked={baseId === l.id} onChange={() => setBaseId(l.id)} /> {l.name}
-        </label>)}
-      </fieldset>
-      <fieldset className="group">
-        <legend>Science overlay</legend>
-        <label className="radio"><input type="radio" name="ovl" checked={!overlayId} onChange={() => setOverlayId(null)} /> None</label>
-        {overlays.map((l) => <label key={l.id} className="radio">
-          <input type="radio" name="ovl" checked={overlayId === l.id} onChange={() => setOverlayId(l.id)} /> {l.name}
-        </label>)}
+        <legend>Filter</legend>
+        <label className="radio"><input type="radio" name="flt" checked={!filter} onChange={() => setFilter(null)} /> None (Viking colour)</label>
+        {FILTERS.map((f) => {
+          const built = !!meta?.layers.some((l) => l.id === (f.id === "ice" ? "ice_0_1" : f.id));
+          return <label key={f.id} className={`radio${built ? "" : " off"}`}>
+            <input type="radio" name="flt" disabled={!built} checked={filter === f.id} onChange={() => setFilter(f.id)} /> {f.name}
+          </label>;
+        })}
+        {filter === "ice" && <div className="sizes depth" role="group" aria-label="Ice depth">
+          {ICE_DEPTHS.map(([id, label]) =>
+            <button key={id} aria-pressed={iceDepth === id} onClick={() => setIceDepth(id)}>{label}</button>)}
+        </div>}
         {overlay && <label className="slider">Opacity <b>{Math.round(opacity * 100)}%</b>
           <input type="range" min={0.1} max={1} step={0.05} value={opacity} onChange={(e) => setOpacity(+e.target.value)} />
         </label>}
+        {meta && !meta.climate_period && <p className="note">Dust, temperature and wind are built on each computer.
+          Run <code>.venv/bin/python pipeline/build_climate.py</code> (about 180 MB of downloads), then reload.</p>}
       </fieldset>
       <fieldset className="group">
         <legend>Display</legend>
@@ -585,7 +592,7 @@ export function Globe({ onExplore, hidden }: {
         {readAt ? <>
           <p className="coords">{fmtLat(readAt.lat)}, {fmtLonE(readAt.lon)}</p>
           <table className="values"><tbody>
-            {meta?.scalars.map((d) => {
+            {meta?.scalars.filter((d) => d.readout !== false).map((d) => {
               const masked = d.mask_above_elev_m !== undefined && elev
                 && (elev.at(readAt.lat, readAt.lon) ?? -Infinity) > d.mask_above_elev_m;
               return <tr key={d.id} title={d.note} className={masked ? "masked" : undefined}>
@@ -596,7 +603,9 @@ export function Globe({ onExplore, hidden }: {
               </tr>;
             })}
           </tbody></table>
-          <p className="note">Values from 0.125° cells (≈7.4 km). Elevation above the MOLA areoid.</p>
+          <p className="note">Values from 0.125° cells (≈7.4 km); elevation above the MOLA areoid.
+            {meta?.climate_period && <> Dust comes from 3° maps and temperature and wind from a 5° reanalysis
+              ({meta.climate_period}), interpolated: regional values, not local ones.</>}</p>
         </> : <p className="muted">Hover or click the globe to read the NASA data at that point.</p>}
       </section>
 

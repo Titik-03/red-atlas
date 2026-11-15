@@ -43,3 +43,10 @@ Mars supplies the colour; the interface stays ink on paper. No gradients except 
 ## Copy
 Sentence case. Units and product names exactly as in the NASA/USGS documentation. Status words (Pass, Warn,
 Fail) instead of symbols. Lists use commas, not middle dots.
+
+## Filters on a surface site
+Same six filters, same legend block under the map as on the globe. The legend badge and the filter description
+say **local** (computed from the site's own elevation: elevation, slope) or **regional** (globe data sampled over
+the site: ice, dust, temperature, wind). Regional layers must never be styled to look like local detail.
+Values that are our choice, not data (for example the station's maximum slope), carry the word "assumption" in
+`--ochre` and are adjustable.

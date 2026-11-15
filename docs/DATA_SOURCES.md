@@ -85,6 +85,33 @@ All layers are resampled onto one global grid: planetocentric, east-positive, �
 
 ---
 
+## 4b. Climate filters: dust, temperature, wind — ✅ in use (built by `pipeline/build_climate.py`)
+Globe scale only. All three cover one Mars year without a global dust storm: Ls 19° of MY30 to Ls 19° of MY31.
+The globe's filter list is: elevation, slope, water ice (three SWIM depths under one entry), dust, temperature, wind.
+
+| Filter | Product | Facts checked | What it is |
+|---|---|---|---|
+| Dust | Montabone et al. kriged daily maps, `dustscenario_MY30_v2-0.nc` (LMD, v2.0) | 669 daily maps, 120 × 60 points at 3°, variables `cdodtot` (total column) and `cdod610` (normalised to 610 Pa), absorption optical depth at 9.3 µm; file title names MRO/MCS and Odyssey/THEMIS | Retrievals from orbit; gaps interpolated by kriging. Shown: annual mean of `cdodtot`. Visible optical depth ≈ 2.6 × this value (per the product page). CC BY-SA 3.0. Cite Montabone et al. (2015), Icarus 251, 65–95 |
+| Temperature | OpenMARS MY28–32 standard database (Open University) | HDF5, 72 × 36 points at 5°, 2-hourly, `tsurf` in K; first latitude 87.5° N, first longitude 180° W | **Reanalysis**: MCS temperature and dust retrievals assimilated into a Mars global circulation model. Surface temperature is computed by the model, not measured. Shown: annual mean; readout also gives the coldest and warmest sampled values |
+| Wind | same files | `u`, `v` in m/s on 35 sigma levels; lowest level σ = 0.9995 (about 5 m above ground) | **Reanalysis**. Wind has never been measured globally on Mars. Shown: annual mean wind speed on the lowest level; arrows give the mean vector direction |
+
+OpenMARS licence is CC BY-NC-ND 4.0 (no derivatives), so the derived files are **not committed**; each computer
+rebuilds them. Cite Holmes, Lewis & Patel (2020), Planet. Space Sci. 188, 104962, doi:10.21954/ou.rd.7352579.v1.
+
+Processing:
+- OpenMARS files are 407 MB each but uncompressed, so only the needed slices are fetched by HTTP range request
+  (about 5 MB per file, 117 MB in total). Sampling: every third sol, all 12 two-hourly steps (2,676 steps on 223 sols).
+- Product values sit on grid points; they are interpolated bilinearly (periodic in longitude) to 1° readout grids and
+  to the overlay textures. Values are regional, not local, and the UI says so.
+
+Checks run by the build (it aborts on failure; results join the data-check badge):
+- Grid orientation of both products: ln(surface pressure), or ln(`cdodtot`/`cdod610`) for dust, against MOLA
+  elevation. r = −0.99 as documented; north–south flipped or longitude-shifted grids give |r| < 0.5.
+- Dust is higher in Ls 180–360° than in Ls 0–180° (the known dusty season).
+- Surface temperature: global mean 205 K, equator warmer than the poles, extremes within 120–320 K.
+- Mean wind speed within 0–30 m/s; sampling covers the whole year; total download under 500 MB.
+`pipeline/audit.py` check 12 re-derives the published readouts from the reduced product grids with independent code.
+
 ## 5. HRSC–MOLA Blended DEM Global 200 m v2 — ✅ in use ("Land here" sites, elevation)
 - **Product:** `Mars_HRSC_MOLA_BlendDEM_Global_200mp_v2.tif`, USGS Astrogeology (Fergason, Hare & Laura 2018). Product page: https://astrogeology.usgs.gov/search/map/mars_mgs_mola_mex_hrsc_blended_dem_global_200m (FGDC XML at the same URL + `.xml`).
 - **Files:** `https://asc-pds-services.s3.us-west-2.amazonaws.com/mosaic/Mars/HRSC_MOLA_Blend/` (`.tif` 11.4 GB, `.lbl`, `_pds3.lbl`, `.tif.aux.xml`, `.lbl.aux.xml`).
@@ -162,8 +189,55 @@ The context ring is built in the site's own local eqc frame, so it lines up with
    - Heights at 25 random points agree with the original 1 m DTM (median |Δ| ≤ 0.25 m, 95th percentile ≤ 1 m; the difference comes only from 2 m averaging).
    - The results are written to `meta.json → validation`.
 
+## Filters on a 3D site and station placement (`web/src/siteFilters.ts`)
+- **Elevation, slope: local.** Computed in the browser from the site's own elevation grid. Slope = central
+  differences over one baseline, and the baseline is never finer than the data (2 m on the Jezero tile, 200 m on
+  HRSC–MOLA sites, where rocks, small craters and dunes are not resolved). Elevation colours are stretched to the
+  site's own range.
+- **Water ice, dust, temperature, wind: regional.** The globe grids (sections 4 and 4b) sampled at each point of the
+  site: 0.125° ice cells (about 7 km), 3° dust maps, 5° reanalysis. On a site they are nearly uniform; the UI marks
+  them "regional" and they must not be read as local detail.
+- **Station placement.** The user picks a point; the station is refused where the local slope exceeds a limit.
+  The limit (default 5°) is **our assumption**, adjustable and labelled in the UI, not a NASA value.
+  The station model is the team's own file, `web/public/models/station.glb` with settings in `station.json`
+  (`scale`, `rotation_y_deg`, `y_offset_m`, `hide` = object names not to draw, `footprint_m`). It is a design by the
+  team, not NASA data: habitat MSH-01, airlock, cargo containers, a pressurised rover, a utility rover and a cargo
+  transporter, in true metres. Its own ground plane is hidden; the model is tilted to the mean ground plane under its
+  footprint. Without the file a stand-in marker is shown.
+- Check: `node web/check-site-filters.mjs` compares the painted colours with values recomputed independently
+  from `heightmap.bin`, and the regional values with the globe grids at the same latitude and longitude.
+
 ## Assumptions (not NASA data; labelled as such in the UI)
 - Tile centre and size, chosen by the team (Jezero) or by the user ("Land here": click point rounded to 0.01°, 10/20/40 km).
 - Vertical exaggeration (default 1×, true scale; the UI warns when ≠ 1).
 - The sky colour and distance haze in the 3D view are visual only (they hide the edge of the context ring).
 - Optional relief lighting is a visual aid. The orthoimage already contains the real sun shading from acquisition.
+
+## Local dust, temperature and wind on a 3D site
+
+These three filters vary inside a site. None of them uses random numbers.
+
+| Filter | Input | What it is | What it is not |
+|---|---|---|---|
+| Dust on the ground | THEMIS night infrared mosaic (Mars Odyssey, ASU / USGS), 100 m, 60° N to 60° S | Loose fines index: fine dust and sand cool fast and are dark at night, rock stays warm. Scaled between the site's 2nd and 98th brightness percentiles. | A dust amount, or dust in the air (that stays the regional Montabone value in the readout). |
+| Temperature, day / night | THEMIS day (global) and night infrared mosaics, 100 m | Where the ground is warmer or colder than the rest of the site. | Kelvin: the mosaics are relative brightness. The regional OpenMARS temperature in kelvin stays in the readout. |
+| Wind exposure | Site elevation grid + OpenMARS mean wind vector (`wind_u`, `wind_v`) | ESTIMATE: minus the maximum upwind slope (Sx, Winstral et al. 2002) within 1/8 of the site (at least 300 m). Upwind rise = sheltered, upwind drop = exposed. | A measured wind speed. Gusts and slope winds are not modelled. Steadiness (mean vector length / mean speed) is shown; below 0.3 the app warns that the direction varies a lot. |
+
+Files: `ir_night.u8`, `ir_day.u8` per site (256 x 256, row 0 = north, 0 = no data), written by
+`pipeline/build_terrain.py` (`add_thermal`; `--thermal-only SITE_DIR` for existing sites). Sites beyond 60° latitude
+have no night infrared, so Dust falls back to the regional layer there. Checks: `web/check-site-filters.mjs`.
+
+## Routes from the station to a target
+
+`web/src/routes.ts`. Dijkstra's shortest path on a 160 x 160 cost grid over a window around the station and the
+target. Route A is the least-cost path; B to D are the least-cost paths after the corridors already found are made
+1.6 times more expensive, kept only when they share under 60 % of their way with earlier routes. All are then
+scored with the real cost and sorted. Deterministic; checks in `web/check-routes.mjs`.
+
+Cost per metre = 1 + 6 (slope / limit)^2 + 1.5 ground dust + 1 wind exposure + 0.5 cold ground by day. Cells steeper
+than the limit are closed. Inputs are the local site layers above (measured slope, THEMIS dust index and day
+infrared, estimated wind exposure).
+
+ASSUMPTIONS (ours, not NASA values, shown as such in the app): the weights; on foot when the target is under 1 km
+in a straight line, otherwise by rover; slope limit 20 degrees on foot and 15 degrees by rover; 2 km/h on foot and
+8 km/h by rover for the travel time.
