@@ -22,6 +22,7 @@ web/public/sites/
 .vscode/
 .idea/
 *.log
+red-atlas-share.zip
 
 # Climate layers (dust, temperature, wind). Temperature and wind derive from OpenMARS (CC BY-NC-ND 4.0: no
 # redistribution of derivatives), so each computer rebuilds them: .venv/bin/python pipeline/build_climate.py

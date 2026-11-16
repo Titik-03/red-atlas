@@ -39,7 +39,7 @@ export interface Route {
   profile: { d: number[]; slope: number[]; dust: number[]; wind: number[] };
 }
 export interface Trip { mode: Mode; straightM: number; routes: Route[]; error: string | null; has: CostGrid["has"]; cellM: number }
-interface XY { x: number; y: number }
+export interface XY { x: number; y: number }
 
 /** Cost inputs on a GRID_N x GRID_N grid over a window around the two end points (clipped to the site). */
 export function buildCostGrid(t: Terrain, wind: RegionalWind | null, a: XY, b: XY, n = GRID_N): CostGrid {
@@ -70,18 +70,21 @@ export function buildCostGrid(t: Terrain, wind: RegionalWind | null, a: XY, b: X
 }
 
 /** Cost per metre of every cell for a travel mode; Infinity where the slope is over the limit or unknown. */
-export function cellCosts(g: CostGrid, mode: Mode): Float32Array {
+export function cellCosts(g: CostGrid, mode: Mode, slopeBoost = 0): Float32Array {
   const lim = TRAVEL[mode].maxSlopeDeg, out = new Float32Array(g.n * g.n);
   for (let i = 0; i < out.length; i++) {
     const s = g.slope[i];
     out[i] = !(s <= lim) ? Infinity
-      : 1 + WEIGHTS.slope * (s / lim) ** 2 + WEIGHTS.dust * g.fines[i] + WEIGHTS.wind * g.expo[i] + WEIGHTS.cold * g.cold[i];
+      : 1 + WEIGHTS.slope * (1 + slopeBoost) * (s / lim) ** 2 + WEIGHTS.dust * g.fines[i] + WEIGHTS.wind * g.expo[i] + WEIGHTS.cold * g.cold[i];
   }
   return out;
 }
 
-/** Dijkstra on the 8-connected grid. Edge cost = length x mean cost of its two cells; no cutting past blocked corners. */
-export function dijkstra(cost: Float32Array, g: CostGrid, src: number, dst: number): number[] | null {
+/**
+ * Dijkstra on the 8-connected grid from one or several source cells. Edge cost = length x mean cost of its two
+ * cells; no cutting past blocked corners. Stops early at `dst` when given; otherwise fills the whole grid.
+ */
+export function dijkstraField(cost: Float32Array, g: CostGrid, sources: number[], dst = -1): { dist: Float64Array; prev: Int32Array } {
   const n = g.n, N = n * n, dist = new Float64Array(N).fill(Infinity), prev = new Int32Array(N).fill(-1), done = new Uint8Array(N);
   const heap: number[] = [], key: number[] = [];                    // binary min-heap of (key, cell)
   const push = (k: number, v: number) => {
@@ -104,7 +107,7 @@ export function dijkstra(cost: Float32Array, g: CostGrid, src: number, dst: numb
     return top;
   };
   const diag = Math.hypot(g.cellX, g.cellY);
-  dist[src] = 0; push(0, src);
+  for (const s of sources) { dist[s] = 0; push(0, s); }
   while (heap.length) {
     const u = pop();
     if (done[u]) continue;
@@ -122,13 +125,19 @@ export function dijkstra(cost: Float32Array, g: CostGrid, src: number, dst: numb
       if (nd < dist[v]) { dist[v] = nd; prev[v] = u; push(nd, v); }
     }
   }
+  return { dist, prev };
+}
+
+/** Least-cost path between two cells, or null when there is none. */
+export function dijkstra(cost: Float32Array, g: CostGrid, src: number, dst: number): number[] | null {
+  const { dist, prev } = dijkstraField(cost, g, [src], dst);
   if (dist[dst] === Infinity) return null;
   const path: number[] = [];
   for (let v = dst; v !== -1; v = prev[v]) path.push(v);
   return path.reverse();
 }
 
-const cellOf = (g: CostGrid, p: XY) => {
+export const cellOf = (g: CostGrid, p: XY) => {
   const c = Math.min(g.n - 1, Math.max(0, Math.floor((p.x - g.west) / g.cellX)));
   const r = Math.min(g.n - 1, Math.max(0, Math.floor((p.y - g.south) / g.cellY)));
   return r * g.n + c;
@@ -147,7 +156,7 @@ function dilate(g: CostGrid, path: number[], radius: number, visit: (i: number) 
   return seen;
 }
 
-function measure(t: Terrain, g: CostGrid, cost: Float32Array, path: number[], a: XY, b: XY, mode: Mode): Route {
+export function measure(t: Terrain, g: CostGrid, cost: Float32Array, path: number[], a: XY, b: XY, mode: Mode): Route {
   const n = g.n, pts: [number, number, number][] = path.map((i, k) => {
     const r = (i / n) | 0, c = i - r * n;
     const p = k === 0 ? a : k === path.length - 1 ? b : { x: g.west + (c + 0.5) * g.cellX, y: g.south + (r + 0.5) * g.cellY };
@@ -169,6 +178,20 @@ function measure(t: Terrain, g: CostGrid, cost: Float32Array, path: number[], a:
     minutes: secs / 60, score: total / flat, cost: total };
 }
 
+/** What earlier trips change in a plan (see report.ts): safer known ground, riskier trouble spots, heavier slopes. */
+export interface RouteLessons { known: [number, number][]; trouble: [number, number][]; slopeBoost: number; knownFactor: number; troubleFactor: number }
+function applyLessons(g: CostGrid, cost: Float32Array, l: RouteLessons) {
+  const inside = (x: number, y: number) => x >= g.west && y >= g.south && x < g.west + g.n * g.cellX && y < g.south + g.n * g.cellY;
+  const k = new Set<number>(), bad = new Set<number>();
+  for (const [x, y] of l.known) if (inside(x, y)) k.add(cellOf(g, { x, y }));
+  for (const [x, y] of l.trouble) if (inside(x, y)) {
+    const c = cellOf(g, { x, y }), r = (c / g.n) | 0, col = c - r * g.n;
+    for (let dr = -1; dr <= 1; dr++) for (let dc = -1; dc <= 1; dc++) if (r + dr >= 0 && r + dr < g.n && col + dc >= 0 && col + dc < g.n) bad.add((r + dr) * g.n + col + dc);
+  }
+  for (const c of k) if (!bad.has(c)) cost[c] *= l.knownFactor;
+  for (const c of bad) cost[c] *= l.troubleFactor;
+}
+
 /**
  * Up to four different routes from the station to the target, best first. The mode (foot or rover) follows from the
  * straight distance between the station and the target; `starts` gives where each mode really sets off from.
@@ -177,10 +200,11 @@ function measure(t: Terrain, g: CostGrid, cost: Float32Array, path: number[], a:
  * earlier route. All routes are then scored with the real, unpenalised cost and sorted.
  */
 export function planRoutes(t: Terrain, wind: RegionalWind | null, station: XY, to: XY, starts?: Record<Mode, XY>,
-    blocked: (XY & { r: number })[] = []): Trip {
+    blocked: (XY & { r: number })[] = [], lessons?: RouteLessons): Trip {
   const straightM = Math.hypot(to.x - station.x, to.y - station.y), mode: Mode = straightM < FOOT_RANGE_M ? "foot" : "rover";
   const from = starts?.[mode] ?? station;     // the airlock door on foot, the parked rover when driving
-  const g = buildCostGrid(t, wind, from, to), cost = cellCosts(g, mode), src = cellOf(g, from), dst = cellOf(g, to);
+  const g = buildCostGrid(t, wind, from, to), cost = cellCosts(g, mode, lessons?.slopeBoost ?? 0), src = cellOf(g, from), dst = cellOf(g, to);
+  if (lessons) applyLessons(g, cost, lessons);
   const trip: Trip = { mode, straightM, routes: [], error: null, has: g.has, cellM: Math.max(g.cellX, g.cellY) };
   // Station buildings and parked vehicles are closed ground (except the one the trip starts from).
   const walls = blocked.filter((b) => Math.hypot(from.x - b.x, from.y - b.y) > b.r);
@@ -192,7 +216,7 @@ export function planRoutes(t: Terrain, wind: RegionalWind | null, station: XY, t
   if (src === dst) return { ...trip, error: "The target is right at the station." };
   if (cost[dst] === Infinity) return { ...trip, error: Number.isNaN(g.slope[dst])
     ? "The target is too close to the edge of the site."
-    : `The target is on a ${g.slope[dst].toFixed(0)}° slope; the limit ${mode === "foot" ? "on foot" : "for the rover"} is ${TRAVEL[mode].maxSlopeDeg}°.` };
+    : `The target is on a ${g.slope[dst].toFixed(1)}° slope; the limit ${mode === "foot" ? "on foot" : "for the rover"} is ${TRAVEL[mode].maxSlopeDeg}°.` };
   if (cost[src] === Infinity) cost[src] = 1 + WEIGHTS.slope;      // the station stands there already
   const work = cost.slice(), kept: number[][] = [];
   for (let k = 0; k < WANTED * 3 && kept.length < WANTED; k++) {

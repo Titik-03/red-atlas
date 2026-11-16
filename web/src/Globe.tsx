@@ -540,10 +540,15 @@ export function Globe({ onExplore, hidden }: {
       </Canvas>
     </div>
 
+    {meta && <div className="stage"><div className="stage-card plain" key={pick ? "picked" : "start"} role="status">
+      <p className="stage-step">{pick ? "Place chosen" : "Start here"}</p>
+      <h2>{pick ? "Land here, or pick another place" : "Pick a place on Mars"}</h2>
+      <p>{pick ? "Press “Land here” in the panel on the right to see the ground in 3D." : "Drag to turn the planet, then click where you want to land. Or press “Explore terrain” to visit Jezero Crater."}</p>
+    </div></div>}
+
     <header className="sheet-head">
       <a className="wordmark" href="#" onClick={(e) => { e.preventDefault(); controls.current?.reset(); }}>RED ATLAS</a>
       <span className="sheet-name">Science globe</span>
-      <span className="sheet-datum">Planetocentric latitude, east-positive longitude</span>
       <span className={`checks${!meta || checksOk ? "" : " bad"}`} title={meta?.validation.map((c) => `${c.ok ? "Pass" : "FAIL"}: ${c.check}`).join("\n")}>
         {meta ? `${meta.validation.filter((c) => c.ok).length} of ${meta.validation.length} data checks passed` : "Loading"}
       </span>
@@ -555,7 +560,7 @@ export function Globe({ onExplore, hidden }: {
         <p>Where could humans live and work?</p>
       </div>
       <fieldset className="group">
-        <legend>Filter</legend>
+        <legend>Show on the map</legend>
         <label className="radio"><input type="radio" name="flt" checked={!filter} onChange={() => setFilter(null)} /> None (Viking colour)</label>
         {FILTERS.map((f) => {
           const built = !!meta?.layers.some((l) => l.id === (f.id === "ice" ? "ice_0_1" : f.id));
@@ -604,7 +609,7 @@ export function Globe({ onExplore, hidden }: {
             })}
           </tbody></table>
           <p className="note">Values from 0.125° cells (≈7.4 km); elevation above the MOLA areoid.
-            {meta?.climate_period && <> Dust comes from 3° maps and temperature and wind from a 5° reanalysis
+            {meta?.climate_period && <> Dust comes from 3° maps and temperature and wind from a 5° weather model (reanalysis)
               ({meta.climate_period}), interpolated: regional values, not local ones.</>}</p>
         </> : <p className="muted">Hover or click the globe to read the NASA data at that point.</p>}
       </section>

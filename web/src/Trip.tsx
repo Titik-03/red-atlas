@@ -45,16 +45,21 @@ const PUFFS = 18, PUFF_LIFE = 2.2;
  * the trail left behind, a second astronaut working around the base, and the camera that follows the crew.
  * Positions come from the trip timeline (sim.ts); nothing here is random.
  */
-export function Life({ data, exaggeration, tl, clock, camMode, controls, rover, base, color, onTick }: {
+export function Life({ data, exaggeration, tl, clock, camMode, controls, rover, base, color, onTick, stranded, rescue, rescueTl, crewHidden }: {
   data: Terrain; exaggeration: number; tl: Timeline | null; clock: React.MutableRefObject<SimClock>;
   camMode: CamMode; controls: React.RefObject<MapControlsImpl>; rover: RoverPart | null; base: BasePoint[] | null;
   color: string; onTick: (t: number) => void;
+  /** Where the trip rover broke down (it stays there); the standby rover and its drive to the crew. */
+  stranded: RoverPart["parked"] | null; rescue: RoverPart | null; rescueTl: Timeline | null;
+  /** The crew is waiting inside the rover cabin, so no figure is shown. */
+  crewHidden: boolean;
 }) {
   const { camera } = useThree();
   const min = data.meta.heightmap.min;
   const sy = (x: number, y: number, z?: number) => ((z ?? sampleElevation(data, x, y) ?? min) - min) * exaggeration;
   const crew = useRef(newPose()), worker = useRef(newPose());
-  const roverG = useRef<THREE.Group>(null), label = useRef<THREE.Group>(null);
+  const roverG = useRef<THREE.Group>(null), rescueG = useRef<THREE.Group>(null), label = useRef<THREE.Group>(null);
+  const rescueAngle = useRef(0), rescueDist = useRef(0), q2 = useMemo(() => new THREE.Quaternion(), []);
   const actor = useRef(new THREE.Vector3()), prev = useRef<THREE.Vector3 | null>(null);
   const glide = useRef<{ t: number; fromP: THREE.Vector3; fromT: THREE.Vector3; overview: boolean } | null>(null);
   const lastTick = useRef(0), puffAt = useRef(0), puffN = useRef(0), wheelAngle = useRef(0), lastDist = useRef(0);
@@ -68,6 +73,12 @@ export function Life({ data, exaggeration, tl, clock, camMode, controls, rover, 
     rover?.object.traverse((o) => { if (/Wheel[FMR][LR]$/.test(o.name)) list.push({ o, q0: o.quaternion.clone() }); });
     return list;
   }, [rover]);
+
+  const rescueWheels = useMemo(() => {
+    const list: { o: THREE.Object3D; q0: THREE.Quaternion }[] = [];
+    rescue?.object.traverse((o) => { if (/Wheel[FMR][LR]$/.test(o.name)) list.push({ o, q0: o.quaternion.clone() }); });
+    return list;
+  }, [rescue]);
 
   // Base activity: walk between the points at 1 m/s, work 8 s at each. A fixed loop on the real clock.
   const loop = useMemo(() => {
@@ -97,7 +108,7 @@ export function Life({ data, exaggeration, tl, clock, camMode, controls, rover, 
     // --- rover: on the trip, or parked at the base
     const g = roverG.current;
     if (g && rover) {
-      const p = driving ? { x: s!.x, y: s!.y, hx: s!.hx, hy: s!.hy } : rover.parked;
+      const p = driving ? { x: s!.x, y: s!.y, hx: s!.hx, hy: s!.hy } : stranded ?? rover.parked;
       groundQuat(data, exaggeration, p.x, p.y, p.hx, p.hy, 4, q);
       g.position.set(p.x, sy(p.x, p.y) + rover.lift, -p.y);
       if (driving && ck.playing && ck.rate <= 10) g.quaternion.slerp(q, 1 - Math.exp(-step * 5)); else g.quaternion.copy(q);
@@ -108,9 +119,21 @@ export function Life({ data, exaggeration, tl, clock, camMode, controls, rover, 
       }
     }
 
+    // --- standby rover: parked at the base, or driving out to the crew
+    const rg = rescueG.current;
+    if (rg && rescue) {
+      const rs = rescueTl ? stateAt(rescueTl, ck.t) : null, p = rs ?? rescue.parked;
+      groundQuat(data, exaggeration, p.x, p.y, p.hx, p.hy, 3, q2);
+      rg.position.set(p.x, sy(p.x, p.y) + rescue.lift, -p.y); rg.quaternion.copy(q2);
+      if (rs) {
+        rescueAngle.current -= (rs.travelled - rescueDist.current) / rescue.wheelR; rescueDist.current = rs.travelled;
+        for (const w of rescueWheels) w.o.quaternion.setFromAxisAngle(new THREE.Vector3(1, 0, 0), rescueAngle.current).multiply(w.q0);
+      } else rescueDist.current = 0;
+    }
+
     // --- crew on the trip
     const c = crew.current;
-    c.visible = !!s && (tl!.mode === "foot" || s.phase === "work");
+    c.visible = !!s && !crewHidden && (tl!.mode === "foot" || s.phase === "work");
     if (s) {
       const side = driving ? rover!.halfTrack + 2.2 : 0;                 // beside the rover when it is parked at the target
       const x = s.x - s.hy * side, y = s.y + s.hx * side;
@@ -208,6 +231,7 @@ export function Life({ data, exaggeration, tl, clock, camMode, controls, rover, 
 
   return <>
     {rover && <group ref={roverG}><primitive object={rover.object} /></group>}
+    {rescue && <group ref={rescueG}><primitive object={rescue.object} /></group>}
     <Astronaut pose={crew} accent={color} />
     <Astronaut pose={worker} accent="#1d4e9e" />
     {trail.map((pts, i) => <Line key={i} points={pts} color="#3b2a22" lineWidth={tl?.mode === "foot" ? 2 : 2.5} transparent opacity={0.8}

@@ -30,9 +30,8 @@ function siteServer(): Plugin {
       sock.on("connect", () => { sock.destroy(); server.config.logger.info(`  site server already running on :${SITE_PORT}`); });
       sock.on("error", () => {
         if (!py) {
-          down = "The Python environment is missing on this computer. One-time setup, from the project folder: "
-            + "python3 -m venv .venv && .venv/bin/pip install rasterio numpy pyyaml pillow matplotlib cmcrameri "
-            + "&& .venv/bin/python pipeline/build_globe.py (downloads about 1.2 GB). Then restart npm run dev.";
+          down = "The Python environment is missing on this computer. Run npm start from the project folder "
+            + "to install dependencies and prepare the data automatically (first setup downloads over 1 GB).";
           server.config.logger.warn(`  site server not started: ${down}`);
           return;
         }

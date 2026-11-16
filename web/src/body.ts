@@ -23,9 +23,14 @@ export const RULES = {
   suitW: 100,                   // extra work against a pressurised suit while moving or working
   rideW: 140,                   // seated in the rover (Apollo: riding the rover was the least demanding activity)
   workW: 250,                   // sampling at the target
+  waitW: 120,                   // standing still in the suit, waiting for help
   etaFirm: 1.1, etaLoose: 2.1,  // Pandolf terrain factor from firm ground to loose fines, by the ground dust index
   kJPerLitreO2: 20.9,           // energy released per litre of oxygen used
   hrLagS: 45,                   // heart rate follows the effort with this delay
+  airPerO2: 25,                 // litres of air breathed per litre of oxygen used (typical in moderate work)
+  rer: 0.85,                    // litres of CO2 breathed out per litre of oxygen used (mixed diet)
+  latentMJkg: 2.43,             // heat carried away per kg of water evaporated (physical constant near skin temperature)
+  breathsRest: 12, breathsMax: 40,
   budgetKcal: 1500,             // energy of a long EVA: fatigue reaches 100 % here
   dustFullM: 2000,              // metres of walking on pure fines in full wind exposure x 0.5 that fill the dust load
   doseMsvPerDay: 0.67,
@@ -43,6 +48,11 @@ export function walkingWatts(speed: number, gradePct: number, dust: number) {
 export interface Vitals {
   t: number; state: SimState;
   watts: number; bpm: number; kcal: number; o2Litres: number; doseMsv: number;
+  suitO2: number;                                          // litres of oxygen taken from the suit (time outside only)
+  ventLmin: number; breaths: number;                       // air breathed per minute, breaths per minute
+  co2Litres: number; waterKg: number;                      // CO2 breathed out, water the cooling must evaporate
+  fineShare: number;                                       // mean ground dust index over the ground covered outside, 0..1
+  outsideS: number;                                        // seconds spent in the suit outside
   fatigue: number; stress: number; dustLoad: number;       // 0..1 indices (assumptions)
   grain: "rock or coarse ground" | "sand" | "fine dust";  // relative class from the night-infrared index
   outside: boolean;                                        // in the suit (true) or inside the rover cabin
@@ -51,21 +61,26 @@ export interface Vitals {
 export interface VitalsLog { dt: number; rows: Vitals[]; peakBpm: number }
 
 /** The whole trip in steps of `dt` simulated seconds. */
-export function buildVitals(tl: Timeline, dt = 5): VitalsLog {
+/** `init` continues from an earlier log (the emergency walk starts with what the trip already cost). */
+export function buildVitals(tl: Timeline, dt = 5, init?: Partial<Vitals>): VitalsLog {
   const rows: Vitals[] = [], lim = TRAVEL[tl.mode].maxSlopeDeg, far = tl.mode === "foot" ? 1000 : 5000;
-  let bpm = CREW.restBpm, kcal = 0, o2 = 0, dose = 0, dust = 0, peak = bpm;
+  let bpm = init?.bpm ?? CREW.restBpm, kcal = init?.kcal ?? 0, o2 = init?.o2Litres ?? 0, dose = init?.doseMsv ?? 0, dust = init?.dustLoad ?? 0, peak = bpm;
+  let suit = init?.suitO2 ?? 0, outS = init?.outsideS ?? 0, co2 = init?.co2Litres ?? 0, water = init?.waterKg ?? 0;
+  let fineSum = (init?.fineShare ?? 0) * 1e-9, fineLen = 1e-9;
   const steps = Math.ceil(tl.totalS / dt);
   for (let i = 0; i <= steps; i++) {
     const t = Math.min(tl.totalS, i * dt), s = stateAt(tl, t), ahead = stateAt(tl, Math.min(tl.totalS, t + dt));
     const run = Math.hypot(ahead.x - s.x, ahead.y - s.y), grade = run > 0.01 && s.phase === ahead.phase ? ((ahead.z - s.z) / run) * 100 : 0;
-    const outside = tl.mode === "foot" || s.phase === "work";
-    const watts = s.phase === "done" ? RULES.restW : s.phase === "work" ? RULES.workW + RULES.suitW
+    const outside = s.phase === "wait" ? !tl.holdInside : tl.mode === "foot" || s.phase === "work";
+    const watts = s.phase === "done" ? RULES.restW : s.phase === "wait" ? (tl.holdInside ? RULES.restW : RULES.waitW) : s.phase === "work" ? RULES.workW + RULES.suitW
       : tl.mode === "rover" ? RULES.rideW : walkingWatts(s.speed, grade, s.dust) + RULES.suitW;
     const target = CREW.restBpm + (HR_MAX - CREW.restBpm) * Math.min(1, Math.max(0, (watts - RULES.restW) / (MAX_W - RULES.restW)));
     if (i) {
       bpm += (target - bpm) * (1 - Math.exp(-dt / RULES.hrLagS));
       kcal += (watts * dt) / 4184; o2 += (watts * dt) / (RULES.kJPerLitreO2 * 1000);
-      if (outside) dose += (RULES.doseMsvPerDay * dt) / 86400;
+      co2 += (RULES.rer * watts * dt) / (RULES.kJPerLitreO2 * 1000); water += (watts * dt) / (RULES.latentMJkg * 1e6);
+      if (outside && s.speed > 0) { fineSum += s.dust * s.speed * dt; fineLen += s.speed * dt; }
+      if (outside) { dose += (RULES.doseMsvPerDay * dt) / 86400; suit += (watts * dt) / (RULES.kJPerLitreO2 * 1000); outS += dt; }
       if (outside) dust += (s.phase === "work" ? 0.3 * dt : s.speed * dt) * s.dust * (0.5 + 0.5 * s.wind) / (RULES.dustFullM * 0.5);
     }
     peak = Math.max(peak, bpm);
@@ -79,7 +94,10 @@ export function buildVitals(tl: Timeline, dt = 5): VitalsLog {
     if (dust > 0.7) alerts.push("Dust load high: clean the suit at the airlock.");
     if (fatigue > 0.8) alerts.push("Fatigue high: energy budget almost used.");
     if (stress > 0.7) alerts.push("Stress high.");
-    rows.push({ t, state: s, watts, bpm, kcal, o2Litres: o2, doseMsv: dose, fatigue, stress, dustLoad: Math.min(1, dust),
+    const effort = Math.min(1, Math.max(0, (watts - RULES.restW) / (MAX_W - RULES.restW)));
+    rows.push({ t, state: s, watts, bpm, kcal, o2Litres: o2, doseMsv: dose, suitO2: suit, outsideS: outS,
+      ventLmin: (RULES.airPerO2 * watts * 60) / (RULES.kJPerLitreO2 * 1000), breaths: RULES.breathsRest + (RULES.breathsMax - RULES.breathsRest) * effort,
+      co2Litres: co2, waterKg: water, fineShare: fineSum / fineLen, fatigue, stress, dustLoad: Math.min(1, dust),
       grain: s.dust > 0.65 ? "fine dust" : s.dust > 0.35 ? "sand" : "rock or coarse ground", outside, alerts });
   }
   return { dt, rows, peakBpm: peak };

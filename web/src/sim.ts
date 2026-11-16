@@ -9,8 +9,16 @@ export interface Timeline {
   mode: Mode; route: Route;
   t: number[];              // seconds after departure at each route point (outbound)
   outS: number; workS: number; totalS: number;
+  /** One way only (an emergency walk or a rescue drive): no work, no return. */
+  oneWay?: boolean;
+  /** Seconds before this actor sets off (the rescue rover leaves after the call). */
+  delayS?: number;
+  /** Seconds spent waiting at the end of a one-way leg (for help), and whether that is inside a rover cabin. */
+  holdS?: number; holdInside?: boolean;
+  /** Walking or driving slower than normal (a crew member in trouble): 1 = normal. */
+  speedFactor?: number;
 }
-export type Phase = "out" | "work" | "back" | "done";
+export type Phase = "out" | "work" | "back" | "wait" | "done";
 export interface SimState {
   phase: Phase; x: number; y: number; z: number;     // site-local metres and elevation
   hx: number; hy: number;                            // unit heading in site-local x (east), y (north)
@@ -20,22 +28,23 @@ export interface SimState {
   slope: number; dust: number; wind: number;         // route values at this point (deg, 0..1, 0..1)
 }
 
-export function buildTimeline(route: Route, mode: Mode): Timeline {
-  const p = route.points, t = [0];
+export function buildTimeline(route: Route, mode: Mode, oneWay = false, delayS = 0, extra: { holdS?: number; holdInside?: boolean; speedFactor?: number } = {}): Timeline {
+  const k = extra.speedFactor ?? 1, holdS = extra.holdS ?? 0;
+  const p = route.points, t = [0], factor = k;
   for (let k = 1; k < p.length; k++) {
     const len = Math.hypot(p[k][0] - p[k - 1][0], p[k][1] - p[k - 1][1], p[k][2] - p[k - 1][2]);
-    t.push(t[k - 1] + len / speedAt(mode, (route.profile.slope[k] + route.profile.slope[k - 1]) / 2));
+    t.push(t[k - 1] + len / (speedAt(mode, (route.profile.slope[k] + route.profile.slope[k - 1]) / 2) * factor));
   }
-  const outS = t[t.length - 1], workS = WORK_MIN[mode] * 60;
-  return { mode, route, t, outS, workS, totalS: 2 * outS + workS };
+  const outS = t[t.length - 1], workS = oneWay ? 0 : WORK_MIN[mode] * 60;
+  return { mode, route, t, outS, workS, totalS: oneWay ? outS + delayS + holdS : 2 * outS + workS, oneWay, delayS, ...extra };
 }
 
 export function stateAt(tl: Timeline, time: number): SimState {
   const { route: r, t, outS, workS, totalS } = tl, p = r.points, n = p.length, pr = r.profile;
-  const now = Math.min(totalS, Math.max(0, time));
-  const phase: Phase = now >= totalS ? "done" : now < outS ? "out" : now < outS + workS ? "work" : "back";
-  const back = phase === "back" || phase === "done";
-  const tt = phase === "work" ? outS : back ? totalS - now : now;       // equivalent outbound time
+  const span = totalS - (tl.delayS ?? 0), now = Math.min(span, Math.max(0, time - (tl.delayS ?? 0)));
+  const phase: Phase = now >= span ? "done" : now < outS ? "out" : tl.oneWay ? "wait" : now < outS + workS ? "work" : "back";
+  const back = !tl.oneWay && (phase === "back" || phase === "done");
+  const tt = phase === "work" || phase === "wait" || (tl.oneWay && phase === "done") ? outS : back ? span - now : now;       // equivalent outbound time
   let k = 1;
   while (k < n - 1 && t[k] < tt) k++;
   const f = t[k] > t[k - 1] ? Math.min(1, Math.max(0, (tt - t[k - 1]) / (t[k] - t[k - 1]))) : 0;
@@ -45,7 +54,7 @@ export function stateAt(tl: Timeline, time: number): SimState {
   return {
     phase, x: mix(p[k - 1][0], p[k][0]), y: mix(p[k - 1][1], p[k][1]), z: mix(p[k - 1][2], p[k][2]),
     hx: (s * dx) / h, hy: (s * dy) / h,
-    speed: phase === "work" || phase === "done" ? 0 : speedAt(tl.mode, slope),
+    speed: phase === "work" || phase === "wait" || phase === "done" || time < (tl.delayS ?? 0) ? 0 : speedAt(tl.mode, slope) * (tl.speedFactor ?? 1),
     dist, travelled: back ? 2 * full - dist : dist,
     slope, dust: mix(pr.dust[k - 1], pr.dust[k]), wind: mix(pr.wind[k - 1], pr.wind[k]),
   };

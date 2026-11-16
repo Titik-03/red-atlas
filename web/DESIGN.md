@@ -3,6 +3,26 @@
 One system for both views (globe and surface site). Tokens live in `src/style.css` `:root`; add a token here
 before inventing a one-off.
 
+## Night theme (2026-11-15, replaces the paper sheet below where they differ)
+Asked for by the team: dark, modern, readable by anyone. The layout (head, two side panels, map window, foot),
+the two faces (Archivo for everything, Newsreader italic for place names) and the wording rules stay.
+
+- **Colour** (tokens in `style.css :root`): ground `--paper #201814` (Martian night, warm umber, not neutral
+  black), cards `--paper-2`, hover and inset `--paper-3`, type `--ink #f3ebe1`, secondary `--ink-2`.
+  `--accent #f28b4a` (dust orange) is only for the one main action and the current step. `--blue #86bdf3`
+  (the blue of a Mars sunset) is for links and focus. Green, ochre and red mean safe, careful, danger and
+  nothing else.
+- **Shape**: cards with an 8 px radius, map window 12 px, controls 6 px. No drop shadows, no glow, no gradients,
+  no coloured side stripes.
+- **Stage** (`.stage`): the few things everyone must see sit large over the map: the current step or the
+  go / no-go verdict, the trip status, the emergency, and five live gauges (air left, heart, tiredness, walk
+  home, time left). Panels keep the detail; technical detail stays folded.
+- **Size**: body 14 px, nothing under 11 px, stage headline 24 to 36 px, gauges 32 px, report headline up to 60 px.
+- **Motion**: one move, `rise` (fade up 12 px, 0.35 to 0.45 s, `--plot` easing) for cards and panels; 0.18 s
+  colour transitions on controls; the emergency card flashes three times, then stays still. All of it off under
+  reduced motion.
+- Backup of the paper version: `~/martian-map-backups/web-before-dark-theme-2026-11-15.tar.gz`.
+
 ## Direction: the map sheet
 The app is a planetary map, so it is laid out like a printed USGS map sheet: the map sits in a framed window
 (double neatline) and everything else is margin information on paper: title block, explanation, scale bar,
@@ -50,3 +70,11 @@ say **local** (computed from the site's own elevation: elevation, slope) or **re
 the site: ice, dust, temperature, wind). Regional layers must never be styled to look like local detail.
 Values that are our choice, not data (for example the station's maximum slope), carry the word "assumption" in
 `--ochre` and are adjustable.
+
+## Trip report and plain words
+The trip report is the one full-sheet overlay: paper sheet with a double ink frame over a dimmed map, large
+italic headline coloured by outcome (green safe, ochre rescued or walked, red failed), six big numbers, then
+"What we learned" before any chart. It opens by itself at the end of every trip and from the Trip log.
+Words are everyday ones ("Can we walk home?", "Body check", "weather model", "beats/min"); the technical term may
+sit in a tooltip. Each filter has one line saying what it means for a person. The four-step guide at the top of
+the panel marks the current step. Messages say what to do next.

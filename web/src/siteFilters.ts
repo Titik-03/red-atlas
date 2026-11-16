@@ -16,6 +16,7 @@ import type { GlobeMeta, LayerDef, ScalarGrid } from "./globeData";
 export const SITE_FILTERS = [
   { id: "elev", name: "Elevation" }, { id: "slope", name: "Slope" }, { id: "ice", name: "Water ice" },
   { id: "dust", name: "Dust" }, { id: "temp", name: "Temperature" }, { id: "wind", name: "Wind" },
+  { id: "walk", name: "Can we walk home?" },
 ] as const;
 export const ICE_DEPTHS: [string, string][] = [["ice_0_1", "0–1 m"], ["ice_1_5", "1–5 m"], ["ice_5", "> 5 m"]];
 
@@ -23,6 +24,8 @@ export interface SiteLayer {
   id: string; name: string; units: string; min: number; max: number; legend: string[];
   /** Labels for the two ends of the legend when the scale is relative (no physical unit). */
   ends?: [string, string];
+  /** Named classes instead of a continuous scale: [colour, label]. */
+  classes?: [string, string][];
   /** local = varies inside the site; regional = globe data sampled over the site. */
   local: boolean; kind: string; note: string;
 }
@@ -158,7 +161,7 @@ export function buildSiteLayer(t: Terrain, id: string, globe: Globe | null, opts
     return { size: 256, rgba: paint(256, (x, y) => groundFines(t, x, y), 0, 1, legend),
       layer: { id, name: "Dust on the ground", units: "", min: 0, max: 1, legend, ends: ["rock", "fine dust, sand"], local: true,
         kind: "Measured from orbit (relative)",
-        note: "THEMIS night infrared, 100 m. Fine dust and sand cool fast and are dark at night; rock stays warm. "
+        note: "THEMIS night infrared (a heat picture of the ground), 100 m. Fine dust and sand cool fast and are dark at night; rock stays warm. "
           + "The scale runs between this site's darkest and brightest ground. It indicates loose fines, not a dust amount, "
           + "and is separate from the dust in the air (a regional value in the readout)." } };
   }
@@ -167,7 +170,7 @@ export function buildSiteLayer(t: Terrain, id: string, globe: Globe | null, opts
     return { size: 256, rgba: paint(256, (x, y) => infrared(t, m, x, y), 0, 1, legend),
       layer: { id, name: m === "day" ? "Daytime ground temperature" : "Night ground temperature", units: "", min: 0, max: 1, legend,
         ends: ["colder", "warmer"], local: true, kind: "Measured from orbit (relative)",
-        note: `THEMIS ${m} infrared, 100 m: where the ground is ${m === "day" ? "warmer in daylight (sunlit slopes, dark ground)" : "warmer at night (rock) or colder (dust, sand)"}. `
+        note: `THEMIS ${m} infrared (a heat picture of the ground), 100 m: where the ground is ${m === "day" ? "warmer in daylight (sunlit slopes, dark ground)" : "warmer at night (rock) or colder (dust, sand)"}. `
           + "Relative to this site only; the mosaic is not calibrated in kelvin. The regional temperature in kelvin is in the readout." } };
   }
   if (id === "wind") {
@@ -188,9 +191,9 @@ export function buildSiteLayer(t: Terrain, id: string, globe: Globe | null, opts
         rgba[i * 4] = R; rgba[i * 4 + 1] = G; rgba[i * 4 + 2] = B; rgba[i * 4 + 3] = 255;
       }
       return { size, rgba, layer: { id, name: "Wind exposure", units: "deg", min: -lim, max: lim, legend, ends: ["sheltered", "exposed"],
-        local: true, kind: "Estimate from measured terrain and reanalysis wind",
+        local: true, kind: "Estimate from measured terrain and weather model wind",
         note: `How open each point is to the regional mean wind, which blows from the ${compass(w.fromDeg)} (${w.fromDeg.toFixed(0)}°) at ${w.speed.toFixed(1)} m/s `
-          + `on average (reanalysis; steadiness ${w.steadiness.toFixed(2)} of 1). Value = minus the steepest upwind rise within ${dmax.toFixed(0)} m `
+          + `on average (weather model; steadiness ${w.steadiness.toFixed(2)} of 1). Value = minus the steepest upwind rise within ${dmax.toFixed(0)} m `
           + "(maximum upwind slope, Winstral et al. 2002). Terrain shelter only: not a measured wind, and gusts or slope winds are not modelled."
           + (w.steadiness < 0.3 ? " The wind direction changes a lot here over the day and year, so treat this map as a weak guide." : "") } };
     }
@@ -199,7 +202,7 @@ export function buildSiteLayer(t: Terrain, id: string, globe: Globe | null, opts
   const gid = id, g = globe?.scalars[gid], l = def(gid);
   if (!g || !l || l.min === undefined || l.max === undefined || !l.legend) return null;
   const kind = l.data_kind ?? (id.startsWith("ice") ? "Analysis combining several instruments" : "");
-  const cell = id.startsWith("ice") ? "0.125° cells (about 7 km)" : id === "dust" ? "3° maps (about 180 km)" : "a 5° reanalysis (about 300 km)";
+  const cell = id.startsWith("ice") ? "0.125° cells (about 7 km)" : id === "dust" ? "3° maps (about 180 km)" : "a 5° weather model (about 300 km)";
   return { size: 128, rgba: paint(128, (x, y) => regional(t, g, x, y), l.min, l.max, l.legend),
     layer: { id, name: l.name, units: l.units ?? "", min: l.min, max: l.max, legend: l.legend, local: false, kind,
       note: `Regional value from ${cell}, the same data as on the globe. It does not show detail inside this site.` } };

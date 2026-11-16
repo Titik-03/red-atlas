@@ -14,7 +14,6 @@
     "CARGO-CNT-02",
     "CARGO-CNT-03",
     "CARGO-TV-01_Transporter",
-    "ROVER-UT-01_Utility",
     "ENV-STATION-01",
     "Floodlight_Tripod",
     "MaintenanceBench",
@@ -42,7 +41,7 @@
       1
     ]
   ],
-  "_notes": "Coordinates are in the model's own frame, metres: [x, z]. seat = parts set on the ground one by one. rover = the part that drives on trips. airlock_exit = where a walk starts. base_walk = loop of the second astronaut ([x, z, 1 = work here]). obstacles = [x, z, radius] circles that routes go around.",
+  "_notes": "Coordinates are in the model's own frame, metres: [x, z]. seat = parts set on the ground one by one. rover = the part that drives on trips. airlock_exit = where a walk starts. base_walk = loop of the second astronaut ([x, z, 1 = work here]). obstacles = [x, z, radius] circles that routes go around. rescue_rover = the standby vehicle that drives out in an emergency.",
   "obstacles": [
     [
       0,
@@ -69,5 +68,6 @@
       8.5,
       4.5
     ]
-  ]
+  ],
+  "rescue_rover": "ROVER-UT-01_Utility"
 }

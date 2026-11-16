@@ -27,22 +27,29 @@ Every 3D view, Jezero included, sits inside a wider, lower-resolution **context 
 
 **Back to Mars** climbs back to orbit. All sources, conventions and checks are in [`docs/DATA_SOURCES.md`](docs/DATA_SOURCES.md). The header badge shows how many automated data checks passed.
 
-## Run
-```bash
-# 1. Build data assets (both scripts abort if any validation check fails)
-python3 -m venv .venv && .venv/bin/pip install rasterio numpy pyyaml pillow matplotlib cmcrameri h5py
-.venv/bin/python pipeline/build_terrain.py   # Jezero HiRISE tile (streams ~1.7 GB; writes ~30 MB)
-.venv/bin/python pipeline/build_globe.py     # globe layers (downloads ~1.2 GB to data/raw/globe; ~2.5 min after that)
-.venv/bin/python pipeline/build_climate.py   # dust, temperature and wind filters (~180 MB of downloads, ~5 min).
-                                             # Not in the repository (OpenMARS licence), so run it once per computer.
-.venv/bin/python pipeline/audit.py           # independent accuracy audit of all published values (17 checks)
+## Run with one command (Windows, macOS, Linux)
 
-# 2. Start the viewer. `npm run dev` also starts the "Land here" site server (pipeline/site_server.py on :8765,
-#    sites -> web/public/sites/<id>/) and proxies /api to it. Needs data/raw/globe/megt90n000fb.img (build_globe.py).
-cd web && npm install && npm run dev                 # open the printed localhost URL
-#    Build one site from the CLI:      .venv/bin/python pipeline/build_terrain.py --lat -4.59 --lon 137.44 --size 20
-#    Add surroundings to a built site: .venv/bin/python pipeline/build_terrain.py --context-only web/public/terrain/jezero
+Install **Node.js 22 or newer** (includes npm) and **Python 3.12 or newer**, with both available on PATH. On Windows, select **Add Python to PATH** during installation. Reopen your terminal after installing them.
+
+Extract the shared ZIP, open a terminal in the `red-atlas` folder containing `package.json`, then run:
+
+```bash
+npm start
 ```
+
+The same command handles first setup and later launches. It creates a project-local Python environment, installs the pinned Python packages and locked web dependencies, builds missing globe/climate data, runs the accuracy audit, and starts both the viewer and the local “Land here” backend. It opens your browser automatically; the terminal also prints the Local URL. Keep the terminal open while using the app; Ctrl+C stops it.
+
+First setup needs internet access, downloads about **1.4 GB** of source data, and takes several minutes or longer depending on the connection. Allow **5 GB of free disk space** for the extracted project, dependencies, caches, and generated sites. Further terrain landings also need internet access. On later launches, existing dependencies and data are reused. If setup fails, fix the reported error and run the same command again.
+
+The ZIP includes the prepared globe, Jezero terrain, and station model. Climate layers are rebuilt on each recipient’s computer because of the existing OpenMARS redistribution restriction; they are never included in the shared ZIP. The original NASA/USGS source cache is downloaded for local site validation and the independent audit.
+
+## Share the project
+
+Send **`red-atlas-share.zip`** and tell recipients to extract it and run `npm start` inside its `red-atlas` folder, after installing the prerequisites above. Git is not required to run the extracted project.
+
+When preparing another copy, include the root launch files (`package.json`, `start.mjs`, `run.py`, `requirements.txt`), README, `pipeline/`, `docs/`, `data/raw/docs/`, and `web/` including the lockfile and prepared `web/public` assets. Exclude `.git/`, `.venv/`, `node_modules/`, `web/dist/`, `web/public/sites/`, downloaded caches, credentials/editor folders, and the climate files listed in `.gitignore`. Do not copy a virtual environment or `node_modules` between PCs.
+
+For development after setup, `cd web` then `npm run dev` still works. Manual data rebuilds use the scripts in `pipeline/`: `build_terrain.py`, `build_globe.py`, `build_climate.py`, and `audit.py`, executed with the Python interpreter in `.venv/bin/` (macOS/Linux) or `.venv/Scripts/` (Windows).
 
 ## Terrain controls
 Left-drag pans · right-drag rotates/tilts · wheel zooms toward the cursor. Hover shows lat/lon/elevation, and a click pins a point.

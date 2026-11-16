@@ -113,9 +113,17 @@ def download(url, path):
     import urllib.request
     print(f"  downloading {url}")
     req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (red-atlas pipeline)"})
-    with urllib.request.urlopen(req) as r, open(path, "wb") as f:
-        while chunk := r.read(1 << 20):
-            f.write(chunk)
+    partial = path.with_name(path.name + ".part")
+    try:
+        with urllib.request.urlopen(req) as r, open(partial, "wb") as f:
+            while chunk := r.read(1 << 20):
+                f.write(chunk)
+            length = r.headers.get("Content-Length")
+            if length is not None and f.tell() != int(length):
+                raise OSError(f"Incomplete download: {url}")
+        partial.replace(path)
+    finally:
+        partial.unlink(missing_ok=True)
 
 
 def hillshade(z, lat_rows, az=315.0, alt=45.0):

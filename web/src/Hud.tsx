@@ -1,9 +1,14 @@
 import type { TerrainMeta } from "./geo";
 import type { SimState, Timeline } from "./sim";
 import type { CamMode } from "./Trip";
+import { HR_MAX, type Vitals, type VitalsLog } from "./body";
+import { BodyPanel } from "./BodyPanel";
 import { fmtVal, type ScalarDef } from "./globeData";
 import { ICE_DEPTHS, SITE_FILTERS, type SiteLayer } from "./siteFilters";
-import { ROUTE_COLORS, type StationSpot } from "./Region";
+import { ROUTE_COLORS, type Emergency, type Safety, type StationSpot } from "./Region";
+import { SUIT_HOURS, type Trouble } from "./walkback";
+import type { Lessons, TripReport } from "./report";
+import { TripLog } from "./Report";
 import { useMemo, useState } from "react";
 import { explainRoutes, FOOT_RANGE_M, TRAVEL, WEIGHTS, type Route, type Trip } from "./routes";
 
@@ -12,15 +17,25 @@ export interface Readout { x: number; y: number; elev: number; lat: number; lon:
 const fmtLat = (v: number) => `${Math.abs(v).toFixed(5)}° ${v >= 0 ? "N" : "S"}`;
 const fmtLon = (v: number) => `${Math.abs(v).toFixed(5)}° ${v >= 0 ? "E" : "W"}`;
 const fmtElev = (v: number) => `${v.toLocaleString("en-US", { minimumFractionDigits: 1, maximumFractionDigits: 1 })} m`;
-const PHASE = { out: "On the way to the target.", work: "Working at the target: taking samples.", back: "On the way back to the station.", done: "Back at the station." } as const;
+const PHASE = { out: "On the way to the target.", work: "Working at the target: taking samples.", back: "On the way back to the station.", wait: "Waiting for help.", done: "Back at the station." } as const;
+/** What each filter means for a person, in one line. */
+const MEANING: Record<string, string> = {
+  elev: "How high the ground is. Climbing costs energy.",
+  slope: "How steep the ground is. Steep ground is slow, tiring, and can tip a rover.",
+  ice: "Where frozen water may lie under the ground: water to drink and to make oxygen from.",
+  dust: "Loose dust and sand. It slows walking, sticks to suits and is unhealthy to breathe.",
+  temp: "Where the ground is warmer or colder than around it.",
+  wind: "Where the wind hits hardest. Wind carries dust onto the crew.",
+  walk: "If the rover breaks down here, can the crew still get home alive?",
+};
 const LEVEL = { pass: "Pass", warn: "Warn", fail: "Fail" } as const;
 
 /** A 0..1 value relative to the site's own range, as a percentage with the nearer end named. */
 const rel = (v: number, low: string, high: string) => `${Math.round(v * 100)}% (${v < 0.35 ? low : v > 0.65 ? high : "middle"})`;
 
 /** Route comparison: one column per route (click to choose), one row per criterion, the best value of each row marked. */
-function Compare({ trip, chosen, setChosen, km, dur }: {
-  trip: Trip; chosen: number; setChosen: (i: number) => void; km: (m: number) => string; dur: (m: number) => string;
+function Compare({ trip, chosen, setChosen, km, dur, walkBack }: {
+  walkBack: { o2: number; time: number; blocked: boolean }[] | null; trip: Trip; chosen: number; setChosen: (i: number) => void; km: (m: number) => string; dur: (m: number) => string;
 }) {
   const rs = trip.routes, pct = (v: number | null) => (v === null ? "n/a" : `${Math.round(v * 100)}%`);
   const rows: [string, string, (r: Route) => number | null, (r: Route) => string][] = [
@@ -31,6 +46,9 @@ function Compare({ trip, chosen, setChosen, km, dur }: {
     ["Time", "At the assumed speed", (r) => r.minutes, (r) => dur(r.minutes)],
     ["Risk", "Total cost, route A = 100", (r) => r.cost, (r) => `${Math.round((r.cost / rs[0].cost) * 100)}`],
   ];
+  const wb = (r: Route) => walkBack?.[rs.indexOf(r)];
+  if (walkBack) rows.push(["Walk back", "Longest walk home if the rover fails at the worst point of the route",
+    (r) => (wb(r)?.blocked ? Infinity : wb(r)?.time ?? null), (r) => (wb(r)?.blocked ? "none" : dur((wb(r)?.time ?? 0) / 60))]);
   return <table className="compare">
     <thead><tr><th />{rs.map((_, i) => <th key={i}>
       <button aria-pressed={chosen === i} onClick={() => setChosen(i)} title={`Choose route ${"ABCD"[i]}`}>
@@ -110,6 +128,14 @@ export function Hud(props: {
   run: Timeline | null; sim: SimState | null; simT: number; startTrip: () => void; endTrip: () => void;
   playing: boolean; setPlaying: (v: boolean) => void; rate: number; setRate: (v: number) => void;
   camMode: CamMode; setCamMode: (m: CamMode) => void;
+  vitals: Vitals | null; vitalsLog: VitalsLog | null; tempK: number | null; groundWarm: number | null;
+  /** Walk-back safety: go / no-go for the chosen route, the worst walk home per route, a breakdown in progress. */
+  safety: Safety | null; walkBack: { o2: number; time: number; blocked: boolean }[] | null; emergency: Emergency | null; trouble: (kind: Trouble) => void;
+  reports: TripReport[]; openReport: (r: TripReport) => void; clearReports: () => void;
+  lessons: Lessons; useLessons: boolean; setUseLessons: (v: boolean) => void; lessonEffect: string | null; rested: () => void; notice: string | null;
+  tank: number; suitHours: number; setSuitHours: (h: number) => void; homeNow: { o2: number; time: number } | null;
+  refuges: number; addRefuge: (r: Readout) => void; clearRefuges: () => void;
+  crewView: boolean; setCrewView: (v: boolean) => void;
 }) {
   const { meta, hover, pick } = props;
   const len = niceLength(props.metresPerPx * 110);
@@ -129,12 +155,54 @@ export function Hud(props: {
   const km = (m: number) => (m >= 1000 ? `${(m / 1000).toFixed(2)} km` : `${m.toFixed(0)} m`);
   const dur = (min: number) => (min >= 60 ? `${Math.floor(min / 60)} h ${Math.round(min % 60)} min` : `${Math.max(1, Math.round(min))} min`);
 
+  const stepNow = !props.station ? 0 : !props.target ? 1 : !props.run ? 2 : 3;
+  // The few things everyone must see are shown large over the map; the panels keep the detail.
+  const v = props.vitals, airLeft = v ? Math.max(0, 1 - v.suitO2 / props.tank) : 1;
+  const tone = (bad: boolean, warn: boolean) => (bad ? "bad" : warn ? "warn" : "good");
+  const cannotWalk = !!v && (!props.homeNow || props.homeNow.o2 > props.tank - v.suitO2);
+  const verdict = trip?.error ? { tone: "bad", head: "No way to get there", text: trip.error }
+    : props.safety ? { tone: !props.safety.go ? "bad" : props.safety.zone === "walk" ? "good" : "warn",
+        head: !props.safety.go ? "Do not go" : props.safety.zone === "walk" ? "Safe to go" : "Safe to go, with a rescue plan", text: props.safety.text }
+    : { tone: "plain", head: "Choose a route", text: "Compare the routes in the panel on the right, then start the trip." };
+  const prompt = stepNow === 0 ? { tone: "plain", head: "Choose where to build the station", text: "Click a flat place on the ground, then press “Place the station here”." }
+    : stepNow === 1 ? { tone: "plain", head: "Where do you want to go?", text: "Click a place on the ground, then press “Go here”. Under 1 km the crew walks. Further, they take the rover." }
+    : verdict;
+
   return (
     <div className={`hud${props.visible ? " in" : ""}`}>
+      {props.visible && !props.crewView && <div className="stage">
+        {props.run && props.sim ? <>
+          <div className={`stage-card ${props.emergency ? (props.emergency.result === "lost" ? "bad" : "warn") : "plain"}${props.emergency ? " alarm" : ""}`} key={props.emergency ? "e" : props.sim.phase} role="status">
+            <p className="stage-step">{props.emergency ? "Emergency" : `Trip under way, route ${"ABCD"[props.chosen]}`}</p>
+            <h2>{props.emergency ? props.emergency.title : PHASE[props.sim.phase].replace(/\.$/, "")}</h2>
+            <p>{props.emergency ? props.emergency.message : v?.alerts[0] ?? "Everything is normal."}</p>
+          </div>
+          {v && <dl className="gauges">
+            <div className={tone(airLeft < 0.2, airLeft < 0.4)}><dt>Air left in the suit</dt><dd>{Math.round(airLeft * 100)}<small>%</small></dd>
+              <i style={{ width: `${airLeft * 100}%` }} /></div>
+            <div className={tone(v.bpm > 0.85 * HR_MAX, v.bpm > 0.7 * HR_MAX)}><dt>Heart</dt><dd>{Math.round(v.bpm)}<small> beats/min</small></dd>
+              <i style={{ width: `${Math.min(100, (v.bpm / HR_MAX) * 100)}%` }} /></div>
+            <div className={tone(v.fatigue > 0.8, v.fatigue > 0.5)}><dt>Tiredness</dt><dd>{Math.round(v.fatigue * 100)}<small>%</small></dd>
+              <i style={{ width: `${Math.min(100, v.fatigue * 100)}%` }} /></div>
+            <div className={tone(cannotWalk, false)}><dt>Walk home from here</dt><dd>{props.homeNow ? dur(props.homeNow.time / 60) : "No way"}</dd>
+              <span>{cannotWalk ? "Not enough air: needs a rescue" : "Enough air to walk"}</span></div>
+            <div className="plain"><dt>Trip time left</dt><dd>{dur(Math.max(0, props.run.totalS - props.simT) / 60)}</dd>
+              <i style={{ width: `${(props.simT / props.run.totalS) * 100}%` }} /></div>
+          </dl>}
+        </> : <div className={`stage-card ${prompt.tone}`} key={`${stepNow}${prompt.head}`} role="status">
+          <p className="stage-step">Step {stepNow + 1} of 4</p>
+          <h2>{prompt.head}</h2>
+          <p>{prompt.text}</p>
+        </div>}
+        {props.notice && <p className="stage-toast" role="alert">{props.notice}</p>}
+      </div>}
       <header className="sheet-head">
         <span className="wordmark">RED ATLAS</span>
         <span className="sheet-name">Surface site</span>
-        <span className="sheet-datum">Planetocentric latitude, east-positive longitude</span>
+        {props.run && <div className="sizes view-switch" role="group" aria-label="View">
+          <button aria-pressed={!props.crewView} onClick={() => props.setCrewView(false)}>Map</button>
+          <button aria-pressed={props.crewView} onClick={() => props.setCrewView(true)}>Crew</button>
+        </div>}
       </header>
 
       <section className="col col-left">
@@ -143,8 +211,14 @@ export function Hud(props: {
           <p>{(meta.extent_m.east - meta.extent_m.west) / 1000} km tile</p>
         </div>
 
+        <ol className="guide" aria-label="How to use this page">
+          {(["Place the station", "Pick a place to go", "Choose a route", "Start the trip and read its report"] as const).map((name, i) => {
+            return <li key={name} className={i < stepNow ? "done" : i === stepNow ? "now" : undefined} aria-current={i === stepNow ? "step" : undefined}>{name}</li>;
+          })}
+        </ol>
+
         <fieldset className="group">
-          <legend>Filter</legend>
+          <legend>Show on the map</legend>
           <label className="radio"><input type="radio" name="sflt" checked={!props.filter} onChange={() => props.setFilter(null)} /> None (image only)</label>
           {SITE_FILTERS.map((f) => {
             const ok = props.available(f.id);
@@ -160,6 +234,7 @@ export function Hud(props: {
             {props.tempModes.map((m) =>
               <button key={m} aria-pressed={props.tempMode === m} onClick={() => props.setTempMode(m)}>{m === "day" ? "Day" : "Night"}</button>)}
           </div>}
+          {props.filter && MEANING[props.filter] && <p className="meaning">{MEANING[props.filter]}</p>}
           {lay && <label className="slider">Opacity <b>{Math.round(props.opacity * 100)}%</b>
             <input type="range" min={0.1} max={1} step={0.05} value={props.opacity} onChange={(e) => props.setOpacity(+e.target.value)} />
           </label>}
@@ -229,7 +304,7 @@ export function Hud(props: {
       </section>
 
       <aside className="col col-right">
-        <section className="block">
+        {!props.run && <section className="block">
           <div className="block-head"><h2>Selected point</h2>
             {pick && <button className="link" onClick={props.clearPick}>Clear</button>}</div>
           {pick ? <table className="values"><tbody>
@@ -240,9 +315,11 @@ export function Hud(props: {
             {at?.exposure != null && <tr title="Estimate: minus the maximum upwind slope"><td>Wind</td><td>{at.exposure > 1 ? "exposed" : at.exposure < -1 ? "sheltered" : "neutral"} (estimate)</td></tr>}
           </tbody></table> : <p className="muted">Click the terrain to inspect a point.</p>}
           {pick && props.station && <button className="primary" onClick={() => props.setTarget(pick)}>Go here from the station</button>}
+          {pick && props.station && <button className="secondary" onClick={() => props.addRefuge(pick)} title="An oxygen and shelter cache the crew can walk to instead of the station">Place an emergency refuge here</button>}
           {pick && !props.station && <button className="primary" disabled={tooSteep || at?.slope == null} onClick={() => props.placeStation(pick)}>Place the station here</button>}
           {pick && !props.station && tooSteep && <p className="error">Too steep: {at!.slope!.toFixed(1)}° here, limit {props.slopeLimit}°.</p>}
           {pick && !props.station && at?.slope == null && <p className="error">Too close to the edge of the site to measure the slope.</p>}
+          {props.notice && <p className="error">{props.notice}</p>}
           {pick && at && <details className="fold">
             <summary>More values</summary>
             <table className="values"><tbody>
@@ -256,7 +333,7 @@ export function Hud(props: {
             <p className="note">Coordinates: planetocentric latitude, east-positive longitude, Mars 2000 sphere
               (R = {meta.body.radius_m.toLocaleString("en-US")} m). Elevation: {meta.heightmap.vertical_reference}</p>
           </details>}
-        </section>
+        </section>}
 
         {props.target && trip && <section className="block">
           <div className="block-head"><h2>Trip to the target</h2>
@@ -264,10 +341,15 @@ export function Hud(props: {
           <p><b>{TRAVEL[trip.mode].label}</b>, {km(trip.straightM)} in a straight line</p>
           {trip.error && <p className="error">{trip.error}</p>}
           {props.run && props.sim && <>
-            <p className="why"><b>Route {"ABCD"[props.chosen]}.</b> {PHASE[props.sim.phase]}</p>
+            {props.emergency ? <>
+              <p className="error">Emergency: {props.emergency.title.toLowerCase()}.</p>
+              <p className="why">{props.emergency.message}</p>
+              <table className="values options"><tbody>{props.emergency.options.map((o) => <tr key={o.name} className={o.chosen ? "chosen" : undefined}>
+                <td>{o.name}</td><td>{o.why}</td></tr>)}</tbody></table>
+            </> : <p className="why"><b>Route {"ABCD"[props.chosen]}.</b> {PHASE[props.sim.phase]}</p>}
             <div className="progress" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round((props.simT / props.run.totalS) * 100)}>
               <div style={{ width: `${(props.simT / props.run.totalS) * 100}%` }} /></div>
-            <p className="profile-at">{km(props.sim.travelled)} of {km(2 * props.run.route.profile.d[props.run.route.profile.d.length - 1])},{" "}
+            <p className="profile-at">{(props.run.route.profile.d.at(-1) ?? 0) > 0 && <>{km(props.sim.travelled)} of {km((props.run.oneWay ? 1 : 2) * props.run.route.profile.d[props.run.route.profile.d.length - 1])},{" "}</>}
               {dur(props.simT / 60)} of {dur(props.run.totalS / 60)}{props.sim.speed > 0 && `, ${(props.sim.speed * 3.6).toFixed(1)} km/h on a ${props.sim.slope.toFixed(0)}° slope`}</p>
             <div className="trip-controls">
               <button className="secondary" onClick={() => props.setPlaying(!props.playing)} disabled={props.sim.phase === "done"}>{props.playing ? "Pause" : "Resume"}</button>
@@ -278,13 +360,31 @@ export function Hud(props: {
                 {(["follow", "overview", "free"] as const).map((m) => <button key={m} aria-pressed={props.camMode === m} onClick={() => props.setCamMode(m)}>{m[0].toUpperCase() + m.slice(1)}</button>)}
               </div>
             </div>
+            {!props.emergency && props.sim.phase !== "done" && <div className="what-if">
+              <p className="muted small">What if something goes wrong here?</p>
+              {props.run.mode === "rover" ? <>
+                <button className="secondary danger" onClick={() => props.trouble("drive")} title="The rover stops but its cabin still holds air">Rover cannot drive</button>
+                <button className="secondary danger" onClick={() => props.trouble("leak")} title="The cabin loses its air: the crew must leave in their suits">Rover cabin leaks</button>
+              </> : <button className="secondary danger" onClick={() => props.trouble("crew")} title="Hurt or exhausted: walks at half speed">Crew member in trouble</button>}
+            </div>}
             <button className="link" onClick={props.endTrip}>{props.sim.phase === "done" ? "Close the trip" : "End the trip"}</button>
           </>}
-          {!props.run && trip.routes.length > 0 && <Compare trip={trip} chosen={props.chosen} setChosen={props.setChosen} km={km} dur={dur} />}
+          {!props.run && trip.routes.length > 0 && <Compare walkBack={props.walkBack} trip={trip} chosen={props.chosen} setChosen={props.setChosen} km={km} dur={dur} />}
           {!props.run && trip.routes[props.chosen] && <>
             <p className="why"><b>Route {"ABCD"[props.chosen]}.</b> {why[props.chosen]}</p>
             <Profile r={trip.routes[props.chosen]} limit={TRAVEL[trip.mode].maxSlopeDeg} color={ROUTE_COLORS[props.chosen]} km={km} setProbe={props.setProbe} />
-            <button className="primary" onClick={props.startTrip}>Start the trip {trip.mode === "foot" ? "on foot" : "by rover"}</button>
+            {props.lessons.count > 0 && <div className="lessons">
+              <label className="check"><input type="checkbox" checked={props.useLessons} onChange={(e) => props.setUseLessons(e.target.checked)} />
+                <span><b>Learn from {props.lessons.count} earlier trip{props.lessons.count > 1 ? "s" : ""}</b></span></label>
+              {props.useLessons && <>
+                <ul>{props.lessons.notes.map((n) => <li key={n}>{n}</li>)}</ul>
+                {props.lessonEffect && <p>{props.lessonEffect}</p>}
+                {props.lessons.carry && <button className="link" onClick={props.rested}>The crew has rested and cleaned the suit</button>}
+                <p className="muted small">These rules are our assumptions. Untick to plan without them.</p>
+              </>}
+            </div>}
+            {props.safety && <p className={`safety ${props.safety.zone}`}>{props.safety.text}</p>}
+            <button className="primary" disabled={props.safety ? !props.safety.go : false} onClick={props.startTrip}>Start the trip {trip.mode === "foot" ? "on foot" : "by rover"}</button>
           </>}
           <details className="fold">
             <summary>How routes are chosen</summary>
@@ -297,7 +397,9 @@ export function Hud(props: {
           </details>
         </section>}
 
-        <section className="block">
+        {props.run && !props.crewView && props.vitals && props.vitalsLog && <BodyPanel v={props.vitals} log={props.vitalsLog} tempK={props.tempK} groundWarm={props.groundWarm} tank={props.tank} homeNow={props.homeNow} />}
+
+        {!props.run && <section className="block">
           <div className="block-head"><h2>Station</h2>
             {props.station && <button className="link" onClick={() => props.placeStation(null)}>Remove</button>}</div>
           {!props.station && <p className="muted">Select a point on the terrain, then place the station there.</p>}
@@ -308,13 +410,20 @@ export function Hud(props: {
           <details className="fold">
             <summary>Settings</summary>
             {pick && props.station && <button className="secondary" disabled={tooSteep || at?.slope == null} onClick={() => props.placeStation(pick)}>Move the station to the selected point</button>}
+            <p className="muted small">Suit life support <span className="warn">assumption</span> (Apollo suits: 4 h, later 8 h)</p>
+            <div className="sizes" role="group" aria-label="Suit life support">
+              {SUIT_HOURS.map((h) => <button key={h} aria-pressed={props.suitHours === h} onClick={() => props.setSuitHours(h)}>{h} h</button>)}
+            </div>
+            {props.refuges > 0 && <button className="link" onClick={props.clearRefuges}>Remove the {props.refuges === 1 ? "refuge" : `${props.refuges} refuges`}</button>}
             <label className="slider">Maximum slope for the station <b>{props.slopeLimit}°</b> <span className="warn">assumption</span>
               <input type="range" min={1} max={15} step={1} value={props.slopeLimit} onChange={(e) => props.setSlopeLimit(+e.target.value)} />
             </label>
             <p className="muted small">{props.hasModel ? "Team model: habitat, airlock, cargo and three vehicles, at true size (about 40 m across)."
               : "Stand-in marker. Put the station model at web/public/models/station.glb to show it here."}</p>
           </details>
-        </section>
+        </section>}
+
+        {!props.run && <TripLog reports={props.reports} open={props.openReport} clear={props.clearReports} />}
 
         <details className="fold block sources">
           <summary>Sources</summary>
@@ -335,10 +444,11 @@ export function Hud(props: {
       <footer className="sheet-foot">
         {lay && <div className="legend">
           <div className="legend-title">{lay.name}<span className="badge">{lay.local ? "local" : "regional"}</span></div>
+          {lay.classes ? <div className="legend-classes">{lay.classes.map(([c, name]) => <span key={name}><i style={{ background: c }} />{name}</span>)}</div> : <>
           <div className="legend-bar" style={{ background: `linear-gradient(90deg, ${lay.legend.join(",")})` }} />
           <div className="legend-scale">{lay.ends
             ? <><span>{lay.ends[0]}{lay.units && ` (${lay.min} ${lay.units})`}</span><span>{lay.ends[1]}{lay.units && ` (+${lay.max} ${lay.units})`}</span></>
-            : <><span>{lay.min} {lay.units}</span><span>{lay.max} {lay.units}</span></>}</div>
+            : <><span>{lay.min} {lay.units}</span><span>{lay.max} {lay.units}</span></>}</div></>}
         </div>}
         <div className="scalebar">
           <div className="bar" style={{ width: `${barPx}px` }} />

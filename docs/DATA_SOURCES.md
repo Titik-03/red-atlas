@@ -241,3 +241,87 @@ infrared, estimated wind exposure).
 ASSUMPTIONS (ours, not NASA values, shown as such in the app): the weights; on foot when the target is under 1 km
 in a straight line, otherwise by rover; slope limit 20 degrees on foot and 15 degrees by rover; 2 km/h on foot and
 8 km/h by rover for the travel time.
+
+## Trips, animation and the crew monitor
+
+Files: `web/src/sim.ts` (trip timeline), `web/src/Trip.tsx` (rover, crew, dust, tracks, cameras), `web/src/Crew.tsx`
+(astronaut figure built from primitives; no astronaut model was supplied), `web/src/body.ts` and
+`web/src/BodyPanel.tsx` (crew monitor), `web/public/models/station.json` (which model part drives, where a walk
+starts, obstacles). Checks: `web/check-sim.mjs`.
+
+The crew monitor is a SIMULATION. There are no sensors; values are computed from the route.
+
+| Value | Source |
+|---|---|
+| Walking power | Pandolf, Givoni & Goldman 1977 (J. Appl. Physiol. 43:577), weights scaled to Mars gravity (assumption), plus 100 W for the suit (assumption). Apollo lunar EVAs averaged 234 kcal/h = 272 W for comparison. |
+| Maximum heart rate | Tanaka, Monahan & Seals 2001: 208 - 0.7 x age |
+| Radiation | 0.67 mSv/day GCR dose equivalent, Curiosity RAD at Gale crater, Aug 2012 to Jun 2013 (Hassler et al. 2014). Measured at Gale, applied here. |
+| Dust grain size | Airborne dust effective radius about 1.5 micrometres (Lemmon et al. 2004: 1.47 +/- 0.21 at Gusev, 1.52 +/- 0.18 at Meridiani) |
+| Oxygen | 20.9 kJ per litre of oxygen (standard approximation) |
+
+ASSUMPTIONS (ours): crew member (35 years, 75 kg, resting 60 bpm, VO2max 40 ml/kg/min), suit 60 kg, rover riding
+140 W, work at the target 350 W for 20 min (foot) or 30 min (rover), speed falling to half at the slope limit,
+terrain factor 1.1 to 2.1 by the dust index, heart-rate lag 45 s, and the stress, fatigue and dust-load indices.
+Station obstacles are hand-set circles in `station.json`. The scene light is a fixed direction, not the sun
+position of the image.
+
+## Walk-back safety, rescue and the Crew view
+
+Files: `web/src/walkback.ts` (walk-home field, zones, rescue plan), `web/src/CrewView.tsx` (human layout),
+`web/src/body.ts` (extended values). Checks: `web/check-walkback.mjs`.
+
+Idea: NASA limits rover outings by the walk back to base if the rover fails. Apollo traverses were planned that
+way, and NASA's Lunar Walkback Test (Norcross et al. 2007, SAE 2007-01-3133) studied a 10 km suited walk as the
+assumed maximum excursion. Here it is computed for the real terrain: one Dijkstra run from the homes (station
+door, refuges) gives every 1/160 cell of the site its cheapest walk home in suit oxygen (Pandolf walking power at
+Mars gravity, slope counted as uphill, 20.9 kJ per litre of oxygen).
+
+Zones: walk home (oxygen needed is within the suit oxygen minus a 10 % reserve), rescue rover in time (ESTIMATE
+on the map: crew walks during the dispatch delay, then closes the gap with a rover 4 times faster), out of reach,
+too steep to walk (over 20 degrees). In a played emergency the rescue is exact: crew and rover move along the
+trip route until they meet.
+
+ASSUMPTIONS (ours): suit life support of 2, 4 or 8 hours sized at 272 W (Apollo suits: 4 h, later 8 h); 10 %
+reserve; rescue rover leaves 10 minutes after the call; refuges are full homes (oxygen and shelter).
+
+Extended body values: air breathed = 25 L per litre of oxygen (typical ratio, assumption), CO2 = 0.85 L per litre
+of oxygen (typical mixed diet, assumption), cooling water = heat / 2.43 MJ per kg (latent heat of water),
+breathing rate rising in a straight line from 12 to 40 per minute with effort (assumption).
+
+## Rescue options, trip reports and lessons
+
+Files: `web/src/walkback.ts` (`decide`, `preflight`, `buildRoverField`), `web/src/report.ts`, `web/src/Report.tsx`,
+`web/src/routes.ts` (`applyLessons`). Checks: `web/check-walkback.mjs`, `web/check-report.mjs`.
+
+**Rescue.** When something goes wrong the app works out every option from where the crew stands and the oxygen
+already used, and plays the one that costs the least suit oxygen. All are listed in the panel and in the report.
+
+| Option | Possible when |
+|---|---|
+| Wait in the rover | The rover cannot drive but its cabin holds air |
+| Walk home | Suit oxygen covers the best walking path, with the 10 % reserve |
+| Walk to a refuge | A refuge is closer than the station |
+| Meet the rescue rover | The rescue rover has a drivable way (15 degree limit) to a point the crew can walk to |
+| No option | Said plainly, with what would have saved the crew |
+
+The rescue rover takes its own fastest drive from the base, not the trip route. Three kinds of trouble: rover
+cannot drive, rover cabin leaks, crew member in trouble on foot (half walking speed). Before departure the same
+calculation is run along the chosen route; the trip is refused if no option works somewhere on it.
+
+Real basis: NASA walk-back planning and the Lunar Walkback Test (above); Apollo traverses were kept within about
+6 miles of the lander for the walk back; NASA's pressurised rover concept (Space Exploration Vehicle) plans two
+vehicles so one can help the other, and a cabin that holds air is a shelter; the Apollo emergency oxygen supply
+lasted about 30 minutes.
+ASSUMPTIONS (ours): emergency supply of 30 minutes at 272 W on our suit; waiting costs 120 W; the rescue rover
+stays at the base during every trip and leaves 10 minutes after the call.
+
+**Trip report.** Every trip ends with a report built only from the trip's own body log (`body.ts`): time, distance,
+energy, highest heart rate, oxygen used and left, dust, radiation, warnings with their place, plan against what
+happened, and the rescue options when there was an emergency. Body numbers are SIMULATED (see the crew monitor
+section). Reports are kept on the user's computer only (browser storage, newest 30 per site) and can be saved
+as a file.
+
+**Lessons for later trips.** All four rules are ASSUMPTIONS (ours), shown in the panel and switchable:
+ground crossed safely counts 15 % less risky; the cells around a warning or a breakdown count 50 % more risky;
+slopes weigh 25 % more when an earlier trip pushed the heart above 70 % of its maximum; energy used, dust on the
+suit and radiation carry over to later trips of the same day until the crew rests.
