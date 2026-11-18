@@ -544,8 +544,10 @@ export function Globe({ onExplore, hidden }: {
     </div>
 
     {meta && showGuide && <div className="stage"><div className="stage-card plain" key={pick ? "picked" : "start"} role="status">
-      <button className="link stage-dismiss" onClick={() => setShowGuide(false)}>Hide guide</button>
-      <p className="stage-step">{pick ? "Place chosen" : "Start here"}</p>
+      <div className="block-head">
+        <p className="stage-step">{pick ? "Place chosen" : "Start here"}</p>
+        <button type="button" className="stage-dismiss" onClick={() => setShowGuide(false)}>Hide guide</button>
+      </div>
       <h2>{pick ? "Land here, or pick another place" : "Pick a place on Mars"}</h2>
       <p>{pick ? "Press “Land here” in the panel on the right to see the ground in 3D." : "Drag to turn the planet, then click where you want to land. Or press “Explore terrain” to visit Jezero Crater."}</p>
     </div></div>}

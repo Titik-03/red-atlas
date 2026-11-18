@@ -421,6 +421,13 @@ input[type="range"]:hover::-moz-range-thumb { background: var(--ink); }
   display: grid; grid-template-rows: auto 1fr auto; justify-items: start; gap: 12px; }
 .stage-card, .gauges > div, .stage-toast { background: color-mix(in srgb, var(--paper) 90%, transparent); border: 1px solid var(--rule); border-radius: 12px; }
 .stage-card { max-width: min(560px, 100%); padding: 16px 22px 18px; animation: rise 0.45s var(--plot) both; }
+.stage-card .block-head { align-items: center; gap: 12px; margin-bottom: 4px; }
+.stage-card .block-head .stage-step { margin-bottom: 0; }
+/* Quiet corner control: small type, no box; padding gives a 44 px target and the negative margin keeps it out of the layout. */
+.stage-dismiss { flex: none; margin: -14px -12px -14px 0; padding: 14px 12px; min-height: 44px; border: 0; border-radius: 6px;
+  background: none; color: var(--ink-2); font: 600 13px/16px var(--ui); cursor: pointer; pointer-events: auto;
+  transition: color 0.18s, background-color 0.18s; }
+.stage-dismiss:hover { color: var(--ink); background: var(--paper-3); }
 .stage-step { font-size: 14px; font-weight: 700; color: var(--accent); margin-bottom: 4px; }
 .stage-card h2 { font-size: clamp(24px, 2.6vw, 36px); line-height: 1.1; font-weight: 800; font-stretch: 92%; letter-spacing: -0.01em; margin-bottom: 6px; text-wrap: balance; }
 .stage-card p:last-child { font-size: 16px; line-height: 1.45; color: var(--ink); max-width: 46ch; }
