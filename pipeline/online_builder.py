@@ -63,8 +63,7 @@ def viking_rows(lat, size_km, path):
     import rasterio
     from rasterio.crs import CRS
     from rasterio.transform import from_origin
-    c = G["context"]
-    half = max(c["min_m"], min(c["max_m"], c["factor"] * size_km * 1000)) / 2 + 30 * VIK["res"]
+    half = bt.context_edge_m(CFG, size_km * 1000, fixed=True) / 2 + 30 * VIK["res"]
     y = float(CFG["body"]["radius_m"]) * np.radians(lat)
     r0 = max(0, int((VIK["y0"] - (y + half)) / VIK["res"]))
     r1 = min(VIK["h"], int((VIK["y0"] - (y - half)) / VIK["res"]) + 1)

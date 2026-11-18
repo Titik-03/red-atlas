@@ -14,6 +14,10 @@ const SEG_LON = 1024, SEG_LAT = 512;
 const JEZERO = { lat: 18.455, lon: 77.425 };
 const SIZES = [10, 20, 40] as const;
 const MAX_LAT = 80;   // pipeline/config.yaml global.max_abs_lat
+const CONTEXT_KM = 160;   // pipeline/config.yaml global.context.global_edge_m: one surroundings square for every size
+/** Camera height that frames the fixed surroundings square with a margin (fov 42 deg): about 75 % of the view height.
+ *  The camera then stays put while the size changes, so 10, 20 and 40 km squares are seen at their true relative size. */
+const FRAME_ALT_KM = CONTEXT_KM * 1.75;
 
 interface Landing {
   lat: number; lon: number; size: number;
@@ -108,6 +112,8 @@ function LandCard({ point, inHiRISE, busy, landing, size, setSize, onLand, onHiR
       <p className="muted small">{STAGE_LABEL[landing.stage ?? "queued"] ?? landing.stage}</p>
     </div>}
     {landing?.status === "error" && <p className="error">Could not build this site: {landing.error}</p>}
+    <p className="footprint-key small"><span className="key-hi" aria-hidden="true" /> {size} × {size} km high-resolution square
+      <span className="key-ctx" aria-hidden="true" /> {CONTEXT_KM} km surroundings, the same for every size</p>
     <p className="muted small">Elevation: HRSC–MOLA, 200 m. Imagery: CTX, about 5 m, uncontrolled. Each site is checked against MOLA.</p>
     {inHiRISE && <button className="secondary" onClick={onHiRISE} disabled={busy}>Open the HiRISE site here (1 m DTM)</button>}
   </section>;
@@ -115,6 +121,8 @@ function LandCard({ point, inHiRISE, busy, landing, size, setSize, onLand, onHiR
 
 type Scalars = Record<string, ScalarGrid>;
 interface Pick { lat: number; lon: number }
+/** A camera flight. `frame` = only zooming to show the chosen square: the app stays usable meanwhile. */
+type FlyTo = Pick & { dist: number; dur?: number; frame?: boolean };
 
 /** Scene radius at (lat, lon) including MOLA relief x exaggeration. */
 function radiusAt(elev: ScalarGrid | undefined, exag: number, R: number, lat: number, lon: number) {
@@ -198,6 +206,83 @@ function SurfaceLine({ pts, color, elev, exag, R, lift = 0.0015, width = 1 }: {
   }, [pts, elev, exag, R, lift, color, width]);
   useEffect(() => () => { obj.geometry.dispose(); (obj.material as THREE.Material).dispose(); }, [obj]);
   return <primitive object={obj} raycast={() => null} />;
+}
+
+/** Lat/lon outline of a square local-eqc tile of edge `km` centred on (lat, lon): the pipeline's footprint(),
+ *  densified so the edges follow the relief. */
+function squareOutline(lat: number, lon: number, km: number, n = 24): [number, number][] {
+  const dLat = (km * 500 / R_MARS) * 180 / Math.PI;
+  const dLon = dLat / Math.cos(lat * Math.PI / 180);
+  const c: [number, number][] = [[lat + dLat, lon - dLon], [lat + dLat, lon + dLon], [lat - dLat, lon + dLon], [lat - dLat, lon - dLon]];
+  const pts: [number, number][] = [];
+  for (let e = 0; e < 4; e++) {
+    const [a, b] = [c[e], c[(e + 1) % 4]];
+    for (let i = 0; i < n; i++) pts.push([a[0] + (b[0] - a[0]) * i / n, a[1] + (b[1] - a[1]) * i / n]);
+  }
+  pts.push(c[0]);
+  return pts;
+}
+const R_MARS = 3396190;
+
+/**
+ * Where a "Land here" site would be: the high-resolution square at its true size (accent outline over a light fill)
+ * and the fixed lower-resolution surroundings square (dashed). Drawn on the relief, like the Jezero tile outline.
+ */
+function SiteFootprint({ lat, lon, km, elev, exag, R }: {
+  lat: number; lon: number; km: number; elev?: ScalarGrid; exag: number; R: number;
+}) {
+  const lift = 0.0008;
+  const pos = (la: number, lo: number, extra = 0) => {
+    const [x, y, z] = latLonToUnit(la, lo);
+    const r = radiusAt(elev, exag, R, la, lo) + (lift + extra) * S;
+    return [x * r, y * r, z * r] as const;
+  };
+  const objs = useMemo(() => {
+    const line = (pts: [number, number][], mat: THREE.LineBasicMaterial | THREE.LineDashedMaterial) => {
+      const arr = new Float32Array(pts.length * 3);
+      pts.forEach(([la, lo], i) => arr.set(pos(la, lo), i * 3));
+      const g = new THREE.BufferGeometry();
+      g.setAttribute("position", new THREE.BufferAttribute(arr, 3));
+      const l = new THREE.Line(g, mat);
+      if (mat instanceof THREE.LineDashedMaterial) l.computeLineDistances();
+      l.renderOrder = 2;
+      return l;
+    };
+    const inner = line(squareOutline(lat, lon, km), new THREE.LineBasicMaterial({ color: "#f28b4a" }));
+    const outer = line(squareOutline(lat, lon, CONTEXT_KM, 48), new THREE.LineDashedMaterial({
+      color: "#f3ebe1", transparent: true, opacity: 0.75, dashSize: 0.0035, gapSize: 0.0025 }));
+    // Fill: a small grid over the square so it follows the relief.
+    const n = 12, dLat = (km * 500 / R_MARS) * 180 / Math.PI, dLon = dLat / Math.cos(lat * Math.PI / 180);
+    const v = new Float32Array((n + 1) * (n + 1) * 3), idx: number[] = [];
+    for (let i = 0; i <= n; i++) for (let j = 0; j <= n; j++)
+      v.set(pos(lat + dLat - 2 * dLat * i / n, lon - dLon + 2 * dLon * j / n, -0.0002), (i * (n + 1) + j) * 3);
+    for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) {
+      const a = i * (n + 1) + j, b = a + 1, c = a + n + 1, d = c + 1;
+      idx.push(a, c, b, b, c, d);
+    }
+    const fg = new THREE.BufferGeometry();
+    fg.setAttribute("position", new THREE.BufferAttribute(v, 3));
+    fg.setIndex(idx);
+    const fill = new THREE.Mesh(fg, new THREE.MeshBasicMaterial({ color: "#f28b4a", transparent: true, opacity: 0.2,
+      depthWrite: false, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }));
+    fill.renderOrder = 1;
+    return [fill, outer, inner];
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lat, lon, km, elev, exag, R]);
+  useEffect(() => () => objs.forEach((o) => { o.geometry.dispose(); (o.material as THREE.Material).dispose(); }), [objs]);
+  const dLat = (km * 500 / R_MARS) * 180 / Math.PI;
+  const tag = pos(lat + dLat, lon + dLat / Math.cos(lat * Math.PI / 180));
+  const cLat = (CONTEXT_KM * 500 / R_MARS) * 180 / Math.PI;
+  const ctxTag = pos(lat - cLat, lon + cLat / Math.cos(lat * Math.PI / 180));
+  return <>
+    {objs.map((o) => <primitive key={o.uuid} object={o} raycast={() => null} />)}
+    <Html position={tag as unknown as [number, number, number]} zIndexRange={[6, 0]} style={{ pointerEvents: "none" }}>
+      <div className="footprint-tag">{km} × {km} km</div>
+    </Html>
+    <Html position={ctxTag as unknown as [number, number, number]} zIndexRange={[6, 0]} style={{ pointerEvents: "none" }}>
+      <div className="footprint-tag ctx">{CONTEXT_KM} km surroundings</div>
+    </Html>
+  </>;
 }
 
 function Graticule({ elev, exag, R }: { elev?: ScalarGrid; exag: number; R: number }) {
@@ -295,18 +380,18 @@ function Picker({ elev, exag, R, onHover, onPick }: {
 
 /** Camera flight along a great circle to a lat/lon, then a callback. Also adapts orbit speed to altitude. */
 function CameraDirector({ controls, flyTo, onArrive, onProgress }: {
-  controls: React.RefObject<OrbitControlsImpl>; flyTo: (Pick & { dist: number }) | null; onArrive: () => void;
+  controls: React.RefObject<OrbitControlsImpl>; flyTo: FlyTo | null; onArrive: () => void;
   onProgress?: (e: number) => void;
 }) {
   const { camera } = useThree();
-  const anim = useRef<{ from: THREE.Vector3; q0: THREE.Quaternion; q1: THREE.Quaternion; d0: number; d1: number; t: number } | null>(null);
+  const anim = useRef<{ from: THREE.Vector3; q0: THREE.Quaternion; q1: THREE.Quaternion; d0: number; d1: number; t: number; dur: number } | null>(null);
   useEffect(() => {
     if (!flyTo) { anim.current = null; return; }
     const from = camera.position.clone().normalize();
     const to = new THREE.Vector3(...latLonToUnit(flyTo.lat, flyTo.lon));
     anim.current = {
       from, q0: new THREE.Quaternion(), q1: new THREE.Quaternion().setFromUnitVectors(from, to),
-      d0: camera.position.length(), d1: flyTo.dist, t: 0,
+      d0: camera.position.length(), d1: flyTo.dist, t: 0, dur: flyTo.dur ?? 2.6,
     };
   }, [flyTo, camera]);
   useFrame((_, dt) => {
@@ -319,7 +404,7 @@ function CameraDirector({ controls, flyTo, onArrive, onProgress }: {
     const a = anim.current;
     if (!a) return;
     const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    a.t = reduce ? 1 : Math.min(1, a.t + dt / 2.6);
+    a.t = reduce ? 1 : Math.min(1, a.t + dt / a.dur);
     const e = a.t < 0.5 ? 4 * a.t ** 3 : 1 - (-2 * a.t + 2) ** 3 / 2;
     const q = new THREE.Quaternion().slerpQuaternions(a.q0, a.q1, e);
     camera.position.copy(a.from.clone().applyQuaternion(q).multiplyScalar(a.d0 + (a.d1 - a.d0) * e));
@@ -385,7 +470,7 @@ export function Globe({ onExplore, hidden }: {
   const [hover, setHover] = useState<Pick | null>(null);
   const [pick, setPick] = useState<Pick | null>(null);
   const [site, setSite] = useState<Site | null>(null);
-  const [flyTo, setFlyTo] = useState<(Pick & { dist: number }) | null>(null);
+  const [flyTo, setFlyTo] = useState<FlyTo | null>(null);
   const [rotating, setRotating] = useState(() => typeof window !== "undefined" && !window.matchMedia("(prefers-reduced-motion: reduce)").matches);
 
   useEffect(() => {
@@ -429,7 +514,7 @@ export function Globe({ onExplore, hidden }: {
 
   const zoom = (f: number) => {
     const o = controls.current; if (!o) return;
-    o.object.position.multiplyScalar(f).clampLength(S * 1.02, 9); o.update();
+    o.object.position.multiplyScalar(f).clampLength(S * 1.008, 9); o.update();
   };
   const rotate = (d: number) => {
     const o = controls.current; if (!o) return;
@@ -480,6 +565,24 @@ export function Globe({ onExplore, hidden }: {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pick, size]);
   useEffect(() => () => { landToken.current++; }, []);
+  // Zoom to the chosen place, framing the fixed surroundings square; changing the size does not move the camera.
+  // "Clear" climbs back to the earlier view.
+  const framed = useRef(false);
+  useEffect(() => {
+    if (hidden || busyRef.current) return;
+    const d = controls.current?.object.position.length() ?? 0;
+    if (pick) {
+      if (d > S * 1.3) rememberOrbit();
+      framed.current = true;
+      setRotating(false);
+      setFlyTo({ ...pick, frame: true, dur: 1.6, dist: radiusAt(elev, exag, R, pick.lat, pick.lon) + (FRAME_ALT_KM * 1000 / R) * S });
+    } else if (framed.current) {
+      framed.current = false;
+      const c = controls.current?.object.position;
+      if (c) { const ll = unitToLatLon(c.x, c.y, c.z); setFlyTo({ ...ll, frame: true, dur: 1.6, dist: orbitDist.current }); }
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pick]);
   const explore = useCallback(() => {
     landToken.current++; setLanding(null); setArrived(false); setRotating(false);
     opened.current = false; rememberOrbit();
@@ -492,7 +595,8 @@ export function Globe({ onExplore, hidden }: {
     setArrived(false); setOpenBase(null); setRotating(false);
     setLanding({ lat: p.lat, lon: p.lon, size, status: "requesting", stage: "requesting" });
     target.current = p; setDescending(true); setDescentE(0);
-    setFlyTo({ lat: p.lat, lon: p.lon, dist: S * 1.035 });
+    // Descend from the framing view toward the square (the surface view takes over behind the veil).
+    setFlyTo({ lat: p.lat, lon: p.lon, dist: radiusAt(elev, exag, R, p.lat, p.lon) + (size * 1200 / R) * S });
     requestSite(p.lat, p.lon, size, (u) => { if (landToken.current === token) setLanding((l) => l && { ...l, ...u }); },
       () => landToken.current !== token)
       .then((st) => {
@@ -506,10 +610,12 @@ export function Globe({ onExplore, hidden }: {
         setOpenBase(null); setDescending(false);
         setFlyTo({ lat: p.lat, lon: p.lon, dist: orbitDist.current });   // climb back to where the user was
       });
-  }, []);
-  const onArrive = useCallback(() => { setFlyTo(null); setArrived(true); }, []);
+  }, [elev, exag, R]);
+  const flyRef = useRef<FlyTo | null>(null);
+  flyRef.current = flyTo;
+  const onArrive = useCallback(() => { const f = flyRef.current; setFlyTo(null); if (!f?.frame) setArrived(true); }, []);
   const inTile = (p: Pick | null) => !!(p && tile && p.lat >= tile.south && p.lat <= tile.north && p.lon >= tile.west && p.lon <= tile.east);
-  const busy = !!flyTo || !!(landing && (landing.status === "requesting" || landing.status === "queued" || landing.status === "running"));
+  const busy = !!(flyTo && !flyTo.frame) || !!(landing && (landing.status === "requesting" || landing.status === "queued" || landing.status === "running"));
   const busyRef = useRef(false);   // read by canvas event handlers: no selection changes during a flight/landing
   busyRef.current = busy || descending;
 
@@ -534,10 +640,12 @@ export function Globe({ onExplore, hidden }: {
           <SurfaceLine pts={tileOutline} color="#ef476f" elev={elev} exag={exag} R={R} lift={0.0004} />
           <SurfaceLine pts={traverse} color="#ffd166" elev={elev} exag={exag} R={R} lift={0.0003} />
         </>}
+        {meta && pick && Math.abs(pick.lat) <= MAX_LAT && !inTile(pick) &&
+          <SiteFootprint lat={pick.lat} lon={pick.lon} km={size} elev={elev} exag={exag} R={R} />}
         <Picker elev={elev} exag={exag} R={R} onHover={setHover}
           onPick={(p) => { if (busyRef.current) return; setPick(p); setSite(null); }} />
         <CameraDirector controls={controls} flyTo={flyTo} onArrive={onArrive} onProgress={onFlightProgress} />
-        <OrbitControls ref={controls} enablePan={false} minDistance={S * 1.02} maxDistance={9}
+        <OrbitControls ref={controls} enablePan={false} minDistance={S * 1.008} maxDistance={9}
           enabled={!flyTo} autoRotate={rotating && !!meta && !flyTo} autoRotateSpeed={0.25}
           enableDamping dampingFactor={0.06} />
       </Canvas>

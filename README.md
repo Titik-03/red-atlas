@@ -17,7 +17,9 @@ The opening view is a **scientific Mars globe**. It uses a calibrated planetocen
 - Each site is validated against its documented headers and MOLA, and the HUD shows the results.
 
 Every 3D view, Jezero included, sits inside a wider, lower-resolution **context ring**:
-- Size: 8 × the site edge, at least 64 km; for Jezero that covers the whole crater.
+- Size: a fixed 160 km square for every "Land here" site, whichever size (10, 20 or 40 km) is chosen for the
+  high-resolution square inside it; the globe draws both squares at the chosen point before landing. The HiRISE
+  Jezero tile uses 8 × its edge, at least 64 km, which covers the whole crater.
 - Data: the 200 m DEM and coarser CTX imagery, under a Mars-sky haze, so there is no black void at the edge.
 - A yellow outline marks the high-resolution tile, which is where readouts apply.
 

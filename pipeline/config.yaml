@@ -122,7 +122,9 @@ global:
     ppd: 32
   sizes_km: [10, 20, 40]
   context:                                     # low-res surroundings drawn around every site (orientation only)
-    factor: 8                                  # context edge = 8 x site edge, clamped below
+    global_edge_m: 160000                      # "Land here" sites: ONE fixed surroundings square for every size,
+                                               # so the 10/20/40 km high-resolution square visibly changes inside it
+    factor: 8                                  # HiRISE tile: context edge = 8 x site edge, clamped below
     min_m: 64000                               # Jezero 4 km tile -> 64 km (whole Jezero crater, ~45 km)
     max_m: 320000
     heightmap_px: 256

@@ -51,6 +51,8 @@ export interface ContextMeta {
   texture: { file: string; width: number; height: number; pixel_m: number };
   extent_m: { west: number; north: number; east: number; south: number };
   dem_sample_m: number; image_native_m: number; image_level: number; note: string;
+  /** True for "Land here" sites: one surroundings square for every tile size (pipeline config global_edge_m). */
+  fixed?: boolean;
 }
 
 export interface Terrain {

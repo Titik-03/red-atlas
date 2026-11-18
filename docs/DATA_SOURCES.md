@@ -163,7 +163,9 @@ Checks run by the build (it aborts on failure; results join the data-check badge
 
 ## Context ring (all 3D views, orientation only)
 The context ring is built in the site's own local eqc frame, so it lines up with the site by construction.
-- **Extent:** 8 × the site edge, clamped to 64–320 km.
+- **Extent:** "Land here" sites: a fixed 160 km square (`global.context.global_edge_m`) for every site size, so the
+  10/20/40 km high-resolution square changes inside the same surroundings. HiRISE tile: 8 × the site edge, clamped
+  to 64–320 km.
 - **Elevation:** the blended DEM, sampled every 200 m × step (step = 1, 3 or 6) onto a 256² grid. Same header checks as the site.
 - **Imagery:** CTX at the finest level within 100 tiles, from level 10 (20 m) down to level 6. It steps down where more than 20 % is missing, and holes are filled from the 4× coarser level.
 - **Measured agreement with the site tile:** Jezero +7.5 m mean (14 m rms) against HiRISE; Gale −0.1 m (same DEM).

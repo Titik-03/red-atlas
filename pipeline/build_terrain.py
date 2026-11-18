@@ -282,8 +282,17 @@ _lock = threading.Lock()
 
 
 def site_id(lat, lon, size_km):
-    """Cache key; the site centre IS the rounded point (0.01 deg ~ 590 m), so the id is honest."""
-    return f"g{round(lat, 2):+07.2f}{round(lon, 2):+08.2f}_{int(size_km)}km".replace("+", "p").replace("-", "m")
+    """Cache key; the site centre IS the rounded point (0.01 deg ~ 590 m), so the id is honest. The "_f" suffix marks
+    sites built with the fixed surroundings square (context.global_edge_m), so older cached sites are not reused."""
+    return f"g{round(lat, 2):+07.2f}{round(lon, 2):+08.2f}_{int(size_km)}km_f".replace("+", "p").replace("-", "m")
+
+
+def context_edge_m(cfg, S_main, fixed=False):
+    """Edge of the surroundings square: fixed for "Land here" sites, 8 x the tile (clamped) for the HiRISE tile."""
+    cx = cfg["global"]["context"]
+    if fixed:
+        return float(cx["global_edge_m"])
+    return float(min(max(cx["factor"] * S_main, cx["min_m"]), cx["max_m"]))
 
 
 def check_header_geo(name, src, exp):
@@ -663,7 +672,7 @@ def build_global(cfg, lat_c, lon_c, size_km, out_web, progress=lambda stage, fra
     shutil.rmtree(tmp, ignore_errors=True)
     tmp.mkdir(parents=True)
     ctx_pool = ThreadPoolExecutor(1)
-    f_ctx = ctx_pool.submit(build_context, cfg, lat_c, lon_c, S, tmp)    # surroundings, in parallel with the site
+    f_ctx = ctx_pool.submit(build_context, cfg, lat_c, lon_c, S, tmp, fixed=True)    # surroundings, in parallel with the site
     print(f"Global site {lat_c}, {lon_c}, {size_km} km: lat {lat_s:.4f}..{lat_n:.4f}, lon {lon_w:.4f}..{lon_e:.4f}")
 
     # ---- elevation (runs concurrently with the imagery download)
@@ -882,14 +891,14 @@ def build_global(cfg, lat_c, lon_c, size_km, out_web, progress=lambda stage, fra
 # =============================================================================================
 # Context ring: a wide, low-resolution terrain around any site (so the high-res tile does not float in a void)
 # =============================================================================================
-def build_context(cfg, lat_c, lon_c, S_main, out_dir, progress=lambda stage, frac: None):
+def build_context(cfg, lat_c, lon_c, S_main, out_dir, progress=lambda stage, frac: None, fixed=False):
     """Write context.bin / context.jpg in the SAME local eqc frame as the site and return meta["context"].
     Elevation: HRSC-MOLA blended DEM (200 m), rows/cols subsampled to the context grid. Imagery: CTX at the finest
     level within a small tile budget. Same documented-header checks as the site; context is optional (on any
     failure the caller just omits it)."""
     g, R = cfg["global"], float(cfg["body"]["radius_m"])
     dem_p, img, cx = g["dem"], g["image"], g["context"]
-    C = float(min(max(cx["factor"] * S_main, cx["min_m"]), cx["max_m"]))
+    C = context_edge_m(cfg, S_main, fixed)
     n, nt = int(cx["heightmap_px"]), int(cx["texture_px"])
     sp, tres = C / n, C / nt
     lon_w, lon_e, lat_s, lat_n = footprint(lat_c, lon_c, C, R)
@@ -961,7 +970,7 @@ def build_context(cfg, lat_c, lon_c, S_main, out_dir, progress=lambda stage, fra
             "extent_m": {"west": x0, "north": y0, "east": -x0, "south": -y0},
             "bounds_deg": {"west": lon_w, "east": lon_e, "south": lat_s, "north": lat_n},
             "dem_sample_m": dem_p["native_m"] * step, "image_native_m": round(native, 1), "image_level": z,
-            "image_gap_fraction": gap,
+            "image_gap_fraction": gap, "fixed": bool(fixed),
             "note": (f"Low-resolution surroundings for orientation only: {dem_p['title']} subsampled to "
                      f"{dem_p['native_m']*step:.0f} m, CTX level {z} (~{native:.0f} m/px). Readouts use the site tile.")}
 

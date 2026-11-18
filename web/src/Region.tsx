@@ -593,9 +593,12 @@ export default function Region({ base }: { base: string }) {
   if (!data) return <Veil opacity={1} label="Downloading terrain" progress={progress * 0.85} sub="elevation grid" />;
 
   const relief0 = data.meta.heightmap.max - data.meta.heightmap.min;
-  // Camera, light and marker sizes were tuned for the 4.096 km Jezero tile; scale them with the tile edge.
-  const k = (data.meta.extent_m.east - data.meta.extent_m.west) / 4096;
   const ctx = data.context ? data.meta.context : undefined;
+  // Camera, light and marker sizes were tuned for the 4.096 km Jezero tile; scale them with the tile edge. "Land here"
+  // sites share one fixed surroundings square, so they are framed by it instead (as an 8x-surroundings tile would be):
+  // the camera then starts at the same height for 10, 20 and 40 km, and the high-resolution square shows its true size.
+  const k = ctx?.fixed ? (ctx.extent_m.east - ctx.extent_m.west) / 8 / 4096
+    : (data.meta.extent_m.east - data.meta.extent_m.west) / 4096;
   // Half-size of the area with data. Fog hides everything beyond it, so there is never a void at the edge.
   const half = ctx ? (ctx.extent_m.east - ctx.extent_m.west) / 2 : 3000 * k;
   const maxDist = ctx ? Math.min(half * 0.32, 14000 * k) : 12000 * k;
