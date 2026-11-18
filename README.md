@@ -1,76 +1,111 @@
-# RED ATLAS — Interactive 3D Martian Map
+<p align="center">
+  <img src="docs/images/social-preview.png" alt="RED ATLAS: pick a place on Mars, land there in 3D" width="100%">
+</p>
 
-NASA Space Apps challenge "Interplanetary Survival Guide: Martian Map".
+<h1 align="center">RED ATLAS</h1>
 
-The opening view is a **scientific Mars globe**. It uses a calibrated planetocentric frame (east-positive, −180…180°) with real NASA data layers that you can switch and read out point by point:
+<p align="center">
+  <b>An interactive 3D map of Mars, built on real NASA, USGS and ESA data.</b><br>
+  Pick any place on the planet, land there, and plan a crew's work on the ground.
+</p>
 
-- **Base maps:** Viking Orbiter colour mosaic, or MGS MOLA shaded elevation (metres above the areoid).
-- **Science overlays:** water ice from the SWIM project (0–1 m, 1–5 m and >5 m depth), MGS TES surface albedo, and regional slope derived from MOLA.
-- **Context:** NASA landing sites from the PDS ODE table, the Perseverance traverse from NASA MMGIS, the Jezero tile outline and a 30° graticule.
-- **Readout:** hover or click anywhere to see lat/lon, elevation, slope, albedo and the three ice-consistency values.
+<p align="center">
+  <a href="https://red-atlas-one.vercel.app"><b>Open the live site</b></a> ·
+  <a href="docs/DATA_SOURCES.md">Data sources</a> ·
+  <a href="#run-it-on-your-computer">Run it locally</a>
+</p>
 
-**Explore terrain** flies down to Jezero and opens the 1 m HiRISE 3D tile.
+---
 
-**Land anywhere:** click any point on the globe, choose 10/20/40 km and press **Land here**.
-- The camera descends while a local server builds a 3D site for that point. Elevation comes from the HRSC–MOLA blended DEM (200 m) and imagery from the CTX global mosaic (~5 m).
-- The site opens in the same viewer, usually in 5–15 s the first time and instantly from cache.
-- Each site is validated against its documented headers and MOLA, and the HUD shows the results.
+RED ATLAS was made for the NASA Space Apps challenge **“Interplanetary Survival Guide: Martian Map”**: where on Mars
+could humans live and work? It answers with a science globe you can read point by point, and a 3D surface view of any
+site you choose.
 
-Every 3D view, Jezero included, sits inside a wider, lower-resolution **context ring**:
-- Size: a fixed 160 km square for every "Land here" site, whichever size (10, 20 or 40 km) is chosen for the
-  high-resolution square inside it; the globe draws both squares at the chosen point before landing. The HiRISE
-  Jezero tile uses 8 × its edge, at least 64 km, which covers the whole crater.
-- Data: the 200 m DEM and coarser CTX imagery, under a Mars-sky haze, so there is no black void at the edge.
-- A yellow outline marks the high-resolution tile, which is where readouts apply.
+**Project lead:** Gamal Mohamed Esseddik
 
-3D views are shown in **Mars colour**: colour from the globe's Viking mosaic, detail from the full-resolution image. A toggle switches back to the original grayscale.
-- A site starts building as soon as you select a point, so it is often ready by the time you press **Land here**.
-- Transitions run through a haze veil with a real progress bar: descent → build → download → surface glide-in, and the reverse on return.
+## What you can do
 
-**Back to Mars** climbs back to orbit. All sources, conventions and checks are in [`docs/DATA_SOURCES.md`](docs/DATA_SOURCES.md). The header badge shows how many automated data checks passed.
+### 1. Read the planet
+<img src="docs/images/globe.jpg" alt="The RED ATLAS globe with its layer list and data readout" width="100%">
 
-## Run with one command (Windows, macOS, Linux)
+- **Base map:** the Viking Orbiter colour mosaic on a globe shaped by MOLA laser altimetry.
+- **Layers:** elevation, slope, water ice at three depths (SWIM project), dust, surface temperature and wind.
+- **Readout:** hover or click anywhere for latitude, longitude and every layer's value at that point.
+- **Context:** NASA landing sites, the Perseverance traverse, the Jezero HiRISE tile and a 30° grid.
 
-Install **Node.js 22 or newer** (includes npm) and **Python 3.12 or newer**, with both available on PATH. On Windows, select **Add Python to PATH** during installation. Reopen your terminal after installing them.
+### 2. Choose a site and see its true size
+<img src="docs/images/globe-site-square.jpg" alt="A 20 km site square drawn on the globe inside its 160 km surroundings" width="100%">
 
-Extract the shared ZIP, open a terminal in the `red-atlas` folder containing `package.json`, then run:
+Click a point and pick **10, 20 or 40 km**. The globe zooms in and draws the high-resolution square at its real size,
+inside the fixed 160 km area of lower-resolution surroundings that comes with every site.
+
+### 3. Land there in 3D
+<img src="docs/images/surface-40km.jpg" alt="A 40 km site in the 3D surface view, its outline inside the hazy surroundings" width="100%">
+
+**Land here** builds the site on demand, usually in 15 to 20 seconds online:
+- **Elevation:** the HRSC–MOLA blended DEM at 200 m.
+- **Imagery:** the CTX global mosaic at about 5 m, coloured from the Viking mosaic.
+- **Checks:** each site is validated against MOLA, and the results are shown in the app.
+
+**Explore terrain** opens the 1 m HiRISE model of Jezero Crater, where Perseverance landed.
+
+### 4. Plan the crew's work
+In the 3D view, the app walks through four steps:
+1. **Place the station** on flat ground.
+2. **Pick a place** to go.
+3. **Choose a route.** Routes are computed from slope, dust, wind exposure and ground temperature.
+4. **Run the trip** and read its report.
+
+During the trip the crew's body is simulated from published physiology: energy use, heart rate, suit oxygen, dust
+and radiation dose. Each report changes how the next trip is planned. Every assumption is labelled as one in the app.
+
+## How the data is kept honest
+- Every product's live header is checked against the values transcribed in `pipeline/config.yaml`. The build stops on
+  any mismatch.
+- Elevation and imagery are reprojected onto one local grid (Mars 2000 sphere, R = 3,396,190 m), so they line up by
+  construction and 1 scene unit is 1 m on the ground.
+- Clicked elevations come from the real elevation grid, not from the 3D mesh.
+- The header badge shows how many automated data checks passed. All sources, licences, conventions and checks are in
+  [`docs/DATA_SOURCES.md`](docs/DATA_SOURCES.md).
+
+## Run it on your computer
+You need **Node.js 22+** and **Python 3.12+** on your PATH. Then, in this folder:
 
 ```bash
 npm start
 ```
 
-The same command handles first setup and later launches. It creates a project-local Python environment, installs the pinned Python packages and locked web dependencies, builds missing globe/climate data, runs the accuracy audit, and starts both the viewer and the local “Land here” backend. It opens your browser automatically; the terminal also prints the Local URL. Keep the terminal open while using the app; Ctrl+C stops it.
+This one command does the whole setup the first time, and just starts the app after that:
+- creates a project-local Python environment and installs the pinned packages and web dependencies;
+- builds any missing globe and climate data and runs the accuracy audit;
+- starts the viewer and the local “Land here” builder, then opens your browser.
 
-First setup needs internet access, downloads about **1.4 GB** of source data, and takes several minutes or longer depending on the connection. Allow **5 GB of free disk space** for the extracted project, dependencies, caches, and generated sites. Further terrain landings also need internet access. On later launches, existing dependencies and data are reused. If setup fails, fix the reported error and run the same command again.
+The first setup downloads about **1.4 GB** of source data, so allow **5 GB** of free disk space. Keep the terminal
+open while you use the app; Ctrl+C stops it.
 
-The ZIP includes the prepared globe, Jezero terrain, and station model. Climate layers are rebuilt on each recipient’s computer because of the existing OpenMARS redistribution restriction; they are never included in the shared ZIP. The original NASA/USGS source cache is downloaded for local site validation and the independent audit.
+For development, run `npm run dev` in `web/`. Checks: `node check-globe.mjs` and `node check-geo.mjs` in `web/`,
+and `npm run build` for the type check and production build.
 
-## Share the project
+## How it is built
+| Part | Technology |
+|---|---|
+| Viewer | React, Three.js (React Three Fiber), Vite, TypeScript |
+| Data pipeline | Python: rasterio, NumPy, Pillow, PyYAML |
+| Online hosting | Vercel: static site, a Python function that builds “Land here” sites, Vercel Blob to store them |
 
-Send **`red-atlas-share.zip`** and tell recipients to extract it and run `npm start` inside its `red-atlas` folder, after installing the prerequisites above. Git is not required to run the extracted project.
-
-When preparing another copy, include the root launch files (`package.json`, `start.mjs`, `run.py`, `requirements.txt`), README, `pipeline/`, `docs/`, `data/raw/docs/`, and `web/` including the lockfile and prepared `web/public` assets. Exclude `.git/`, `.venv/`, `node_modules/`, `web/dist/`, `web/public/sites/`, downloaded caches, credentials/editor folders, and the climate files listed in `.gitignore`. Do not copy a virtual environment or `node_modules` between PCs.
-
-For development after setup, `cd web` then `npm run dev` still works. Manual data rebuilds use the scripts in `pipeline/`: `build_terrain.py`, `build_globe.py`, `build_climate.py`, and `audit.py`, executed with the Python interpreter in `.venv/bin/` (macOS/Linux) or `.venv/Scripts/` (Windows).
-
-## Terrain controls
-Left-drag pans · right-drag rotates/tilts · wheel zooms toward the cursor. Hover shows lat/lon/elevation, and a click pins a point.
-
-## Web checks
-From `web/`, run `node check-globe.mjs` (initial view, reduced motion) and `node check-geo.mjs` (globe geodesy), and `npm run build` for TypeScript and the production build. Browser rendering and external imagery loading need a browser with WebGL and network access.
-
-## How accuracy is kept
-- The pipeline checks each product's live header against `pipeline/config.yaml` (values transcribed from the USGS metadata and labels). It stops on any mismatch.
-- Both rasters are reprojected onto one local Equirectangular grid (Mars 2000 sphere, R = 3,396,190 m) centred on the tile, so 1 scene unit = 1 ground metre and the DTM and imagery align by construction.
-- Clicked elevations come from bilinear sampling of the real Float32 DTM grid, not from mesh vertices.
-- The validation results (heights vs. the source DTM, geolocation-formula error) are stored in `web/public/terrain/jezero/meta.json`.
-- On-demand sites also compare their DEM with MOLA MEGDR and check that the uncontrolled CTX imagery lines up with the DEM. They screen out defective server tiles, and every result is stored in `meta.json → validation.checks` and shown in the HUD.
-
-## Layout
 ```
-pipeline/   config.yaml, build_terrain.py (build_site: hirise_jezero | global), site_server.py, build_globe.py, build_climate.py, audit.py
-docs/       DATA_SOURCES.md (data dossier)
-data/raw/docs/  official metadata/labels as downloaded
-data/processed/ local-grid GeoTIFFs (for checking with GIS tools)
-web/        Vite + React + Three.js (React Three Fiber) viewer
+web/        the viewer (globe, 3D surface view, crew simulation)
+pipeline/   data builders: build_terrain.py, build_globe.py, build_climate.py, audit.py,
+            site_server.py (local builder), online_builder.py (Vercel builder)
+api/        Vercel entry point for the online builder
+docs/       DATA_SOURCES.md: every source, licence and check
 ```
+
+## Data credits
+NASA, JPL-Caltech and the University of Arizona (HiRISE); NASA/JPL/MSSS/The Murray Lab (CTX); NASA GSFC (MOLA);
+ESA, DLR and FU Berlin (HRSC); USGS Astrogeology (Viking mosaic, blended DEM, HiRISE DTM); SWIM4MIM, PSI and NASA JPL
+(subsurface water ice); Montabone et al. 2015 (dust); OpenMARS, Open University (temperature and wind). Full
+citations and licences are in [`docs/DATA_SOURCES.md`](docs/DATA_SOURCES.md).
+
+## Author
+**Gamal Mohamed Esseddik**, project lead.

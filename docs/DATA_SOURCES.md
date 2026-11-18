@@ -95,8 +95,9 @@ The globe's filter list is: elevation, slope, water ice (three SWIM depths under
 | Temperature | OpenMARS MY28–32 standard database (Open University) | HDF5, 72 × 36 points at 5°, 2-hourly, `tsurf` in K; first latitude 87.5° N, first longitude 180° W | **Reanalysis**: MCS temperature and dust retrievals assimilated into a Mars global circulation model. Surface temperature is computed by the model, not measured. Shown: annual mean; readout also gives the coldest and warmest sampled values |
 | Wind | same files | `u`, `v` in m/s on 35 sigma levels; lowest level σ = 0.9995 (about 5 m above ground) | **Reanalysis**. Wind has never been measured globally on Mars. Shown: annual mean wind speed on the lowest level; arrows give the mean vector direction |
 
-OpenMARS licence is CC BY-NC-ND 4.0 (no derivatives), so the derived files are **not committed**; each computer
-rebuilds them. Cite Holmes, Lewis & Patel (2020), Planet. Space Sci. 188, 104962, doi:10.21954/ou.rd.7352579.v1.
+OpenMARS licence is CC BY-NC-ND 4.0 (non-commercial, no derivatives). The derived temperature and wind layers
+(`web/public/globe/climate.json`, `temp*`, `wind*`) are included in this repository and in the online version for the
+non-commercial project presentation, with the citation below; `pipeline/build_climate.py` rebuilds them from source. Cite Holmes, Lewis & Patel (2020), Planet. Space Sci. 188, 104962, doi:10.21954/ou.rd.7352579.v1.
 
 Processing:
 - OpenMARS files are 407 MB each but uncompressed, so only the needed slices are fetched by HTTP range request

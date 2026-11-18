@@ -114,6 +114,9 @@ button:disabled { cursor: not-allowed; opacity: 0.45; }
   background: var(--ink); color: var(--paper); }
 .link { border: 0; background: none; padding: 0; color: var(--blue); text-decoration: underline; text-underline-offset: 2px; }
 .sizes { display: grid; grid-template-columns: repeat(3, 1fr); }
+.about p { color: var(--ink-2); }
+.about .credit { margin: 10px 0 0; color: var(--ink-2); }
+.about .credit b { color: var(--ink); font-weight: 600; margin-left: 4px; }
 /* Key for the two squares drawn on the globe: solid accent = high-resolution site, dashed pale = fixed surroundings. */
 .footprint-key { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin: 10px 0 0; color: var(--ink-2); }
 .footprint-key span { flex: none; width: 14px; height: 14px; border-radius: 2px; }

@@ -1,6 +1,24 @@
 {
   "name": "red-atlas",
+  "version": "1.0.0",
   "private": true,
+  "description": "RED ATLAS: an interactive 3D map of Mars built on real NASA, USGS and ESA data. Pick a place, land there in 3D.",
+  "author": "Gamal Mohamed Esseddik",
+  "homepage": "https://red-atlas-one.vercel.app",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Titik-03/Landing-on-Mars.git"
+  },
+  "keywords": [
+    "mars",
+    "nasa",
+    "space-apps",
+    "3d",
+    "threejs",
+    "react",
+    "gis",
+    "planetary-science"
+  ],
   "scripts": {
     "start": "node start.mjs"
   }

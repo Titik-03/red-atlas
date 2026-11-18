@@ -1,0 +1,16 @@
+{
+  "name": "RED ATLAS: Mars science globe",
+  "short_name": "RED ATLAS",
+  "description": "Pick any place on Mars and land there in 3D, using real NASA, USGS and ESA data.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#201814",
+  "theme_color": "#201814",
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
+    { "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml" }
+  ]
+}

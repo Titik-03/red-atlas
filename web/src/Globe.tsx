@@ -751,6 +751,13 @@ export function Globe({ onExplore, hidden }: {
         <p className="muted">Fly down to the western delta front: 3D terrain from the HiRISE 1 m DTM and 25 cm imagery. On the globe, the red box is the tile and the yellow line is the Perseverance traverse (NASA waypoints).</p>
         <button className="primary" onClick={explore} disabled={!!flyTo}>{flyTo ? "Descending" : "Explore terrain"}</button>
       </section>
+
+      <section className="block about">
+        <div className="block-head"><h2>About</h2><span className="muted small">NASA Space Apps</span></div>
+        <p>RED ATLAS answers the challenge “Interplanetary Survival Guide: Martian Map”: find where humans could live
+          and work on Mars, using open NASA, USGS and ESA data.</p>
+        <p className="credit">Project lead <b>Gamal Mohamed Esseddik</b></p>
+      </section>
     </aside>
 
     {!meta && <div className="globe-status" role="status" aria-live="polite">

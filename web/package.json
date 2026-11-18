@@ -1,7 +1,9 @@
 {
   "name": "red-atlas-web",
   "private": true,
-  "version": "0.1.0",
+  "version": "1.0.0",
+  "description": "RED ATLAS viewer: Mars globe and 3D surface sites",
+  "author": "Gamal Mohamed Esseddik",
   "type": "module",
   "scripts": {
     "dev": "vite",
