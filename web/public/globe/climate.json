@@ -1,0 +1,208 @@
+{
+ "period": "Mars Year 30 (Ls 19 of MY30 to Ls 19 of MY31)",
+ "layers": [
+  {
+   "id": "dust",
+   "kind": "overlay",
+   "name": "Dust",
+   "texture": "dust.png",
+   "data_kind": "Measured from orbit, gaps interpolated",
+   "units": "optical depth",
+   "min": 0.06,
+   "max": 0.24,
+   "legend": [
+    "#4c0001",
+    "#702126",
+    "#8e3f46",
+    "#9e5a55",
+    "#a46f5a",
+    "#a9825e",
+    "#ae9663",
+    "#b9af82",
+    "#c4c0ac",
+    "#d6d5d3",
+    "#ffffff"
+   ],
+   "description": "Dust in the atmosphere above each point: annual mean of the daily column dust optical depth (absorption at 9.3 um, total column down to the local surface) for Mars Year 30, a year without a global dust storm. Multiply by 2.6 for an approximate visible optical depth. 3-degree maps; it does not show dust lying on the ground or single storms.",
+   "mission": "MRO, Mars Odyssey",
+   "instrument": "MCS, THEMIS",
+   "product": "dustscenario_MY30_v2-0",
+   "source": "Montabone et al. (2015), Icarus 251, 65-95; LMD. CC BY-SA 3.0",
+   "url": "https://www-mars.lmd.jussieu.fr/mars/dust_climatology/dataset_v2/dustscenario_MY30_v2-0.nc",
+   "doc": "https://www-mars.lmd.jussieu.fr/mars/dust_climatology/"
+  },
+  {
+   "id": "temp",
+   "kind": "overlay",
+   "name": "Temperature",
+   "texture": "temp.png",
+   "data_kind": "Reanalysis",
+   "units": "K",
+   "min": 150.0,
+   "max": 230.0,
+   "legend": [
+    "#033198",
+    "#1e5fac",
+    "#2d88be",
+    "#4bb2ce",
+    "#89dad7",
+    "#c1eac2",
+    "#d2d484",
+    "#c1a343",
+    "#ac7726",
+    "#974d13",
+    "#7e1700"
+   ],
+   "description": "Annual mean temperature of the ground surface for Mars Year 30. A reanalysis: orbiter measurements of atmospheric temperature and dust are fed into a climate model, which computes the surface temperature. Day-night swings are large; the readout gives the coldest and warmest values. 5-degree grid, so it shows regions, not local sites.",
+   "mission": "MRO (assimilated observations)",
+   "instrument": "MCS + Open University Mars GCM",
+   "product": "OpenMARS MY28-32 standard database",
+   "source": "Holmes, Lewis & Patel (2020), Planet. Space Sci. 188, 104962. CC BY-NC-ND 4.0",
+   "url": "https://doi.org/10.21954/ou.rd.7352579.v1",
+   "doc": "https://ndownloader.figshare.com/files/14441774"
+  },
+  {
+   "id": "wind",
+   "kind": "overlay",
+   "name": "Wind",
+   "texture": "wind.png",
+   "data_kind": "Reanalysis",
+   "units": "m/s",
+   "min": 0.0,
+   "max": 13.0,
+   "legend": [
+    "#fefefe",
+    "#f5f5d7",
+    "#d4dba8",
+    "#a6b78a",
+    "#849e89",
+    "#6b8d93",
+    "#547d9c",
+    "#3a679b",
+    "#234a8c",
+    "#0f286d",
+    "#00054a"
+   ],
+   "description": "Annual mean wind speed about 5 m above the ground (lowest model level) for Mars Year 30; arrows show the mean direction and are longer where the wind is steadier. A reanalysis: wind has never been measured globally on Mars, so it is computed by a climate model constrained by orbiter temperature and dust measurements. Gusts and local slope winds are not resolved on the 5-degree grid.",
+   "mission": "MRO (assimilated observations)",
+   "instrument": "MCS + Open University Mars GCM",
+   "product": "OpenMARS MY28-32 standard database",
+   "source": "Holmes, Lewis & Patel (2020), Planet. Space Sci. 188, 104962. CC BY-NC-ND 4.0",
+   "url": "https://doi.org/10.21954/ou.rd.7352579.v1",
+   "doc": "https://ndownloader.figshare.com/files/14441774"
+  }
+ ],
+ "scalars": [
+  {
+   "id": "dust",
+   "file": "dust.i16",
+   "scale": 10000,
+   "units": "",
+   "label": "Dust optical depth",
+   "width": 360,
+   "height": 180,
+   "note": "annual mean column dust optical depth, 9.3 um absorption, MY30; 3-degree product, interpolated"
+  },
+  {
+   "id": "temp",
+   "file": "temp.i16",
+   "scale": 10,
+   "units": "K",
+   "label": "Surface temperature, mean",
+   "width": 360,
+   "height": 180,
+   "note": "annual mean; OpenMARS reanalysis MY30, 5-degree grid, interpolated; not a direct measurement"
+  },
+  {
+   "id": "temp_min",
+   "file": "temp_min.i16",
+   "scale": 10,
+   "units": "K",
+   "label": "Surface temperature, coldest",
+   "width": 360,
+   "height": 180,
+   "note": "coldest sampled 2-hourly value of the year; OpenMARS reanalysis MY30, 5-degree grid, interpolated; not a direct measurement"
+  },
+  {
+   "id": "temp_max",
+   "file": "temp_max.i16",
+   "scale": 10,
+   "units": "K",
+   "label": "Surface temperature, warmest",
+   "width": 360,
+   "height": 180,
+   "note": "warmest sampled 2-hourly value of the year; OpenMARS reanalysis MY30, 5-degree grid, interpolated; not a direct measurement"
+  },
+  {
+   "id": "wind",
+   "file": "wind.i16",
+   "scale": 100,
+   "units": "m/s",
+   "label": "Wind speed, mean",
+   "width": 360,
+   "height": 180,
+   "note": "annual mean wind speed on the lowest model level (about 5 m above ground); OpenMARS reanalysis MY30, 5-degree grid, interpolated; not a direct measurement"
+  },
+  {
+   "id": "wind_u",
+   "file": "wind_u.i16",
+   "scale": 100,
+   "units": "m/s",
+   "label": "Mean wind, eastward",
+   "width": 360,
+   "height": 180,
+   "readout": false,
+   "note": "annual mean eastward wind component on the lowest model level; OpenMARS reanalysis MY30"
+  },
+  {
+   "id": "wind_v",
+   "file": "wind_v.i16",
+   "scale": 100,
+   "units": "m/s",
+   "label": "Mean wind, northward",
+   "width": 360,
+   "height": 180,
+   "readout": false,
+   "note": "annual mean northward wind component on the lowest model level; OpenMARS reanalysis MY30"
+  }
+ ],
+ "validation": [
+  {
+   "ok": true,
+   "check": "Dust grid orientation: total/normalised optical depth follows surface pressure, i.e. MOLA elevation (r = -0.99; wrong orientations are far weaker)"
+  },
+  {
+   "ok": true,
+   "check": "Dust season: mean normalised optical depth is higher in Ls 180-360 (0.16) than in Ls 0-180 (0.08), the known dusty season"
+  },
+  {
+   "ok": true,
+   "check": "Dust annual mean within physical bounds (0.059 .. 0.257)"
+  },
+  {
+   "ok": true,
+   "check": "OpenMARS sampling covers the whole year: 2676 two-hourly steps on 223 sols (every 3rd sol, Ls 19 of MY30 to Ls 19 of MY31)"
+  },
+  {
+   "ok": true,
+   "check": "OpenMARS grid orientation: surface pressure follows MOLA elevation (r = -0.99; wrong orientations are far weaker)"
+  },
+  {
+   "ok": true,
+   "check": "Surface temperature is physically plausible: global mean 205 K, equator 217 K, poles 162 K"
+  },
+  {
+   "ok": true,
+   "check": "Surface temperature extremes within bounds (142 .. 312 K; CO2 frost point is about 145 K)"
+  },
+  {
+   "ok": true,
+   "check": "Mean near-surface wind speed within bounds (3.2 .. 18.3 m/s)"
+  },
+  {
+   "ok": true,
+   "check": "Download stayed within budget (0 MB of 500 MB)"
+  }
+ ],
+ "generated_utc": "2026-11-15T02:00:01+00:00"
+}
