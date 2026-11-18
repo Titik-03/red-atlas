@@ -36,6 +36,8 @@ export interface GlobeMeta {
   generated_utc: string;
   /** Period of the climate layers (dust, temperature, wind); absent when build_climate.py has not been run. */
   climate_period?: string;
+  /** True when only the public climate file (dust) was found, as in the online version. */
+  climate_public?: boolean;
 }
 
 export const GLOBE_BASE = "/globe";
@@ -91,13 +93,18 @@ async function fetchGlobeMeta(): Promise<GlobeMeta> {
     throw new Error("globe.json not found. Build it first: `.venv/bin/python pipeline/build_globe.py`.");
   const meta: GlobeMeta = JSON.parse(text);
   // Optional climate layers (pipeline/build_climate.py). They are rebuilt per computer, so they may be absent.
-  const c = await fetch(`${GLOBE_BASE}/climate.json`).then((r) => (r.ok ? r.text() : "")).catch(() => "");
-  if (c && !c.trimStart().startsWith("<")) {
+  // The online version has only climate_public.json: dust alone (temperature and wind may not be redistributed).
+  const get = (f: string) => fetch(`${GLOBE_BASE}/${f}`).then((r) => (r.ok ? r.text() : "")).catch(() => "");
+  const ok = (t: string) => !!t && !t.trimStart().startsWith("<");
+  let c = await get("climate.json");
+  if (!ok(c)) c = await get("climate_public.json");
+  if (ok(c)) {
     const clim = JSON.parse(c);
     meta.layers.push(...clim.layers);
     meta.scalars.push(...clim.scalars);
     meta.validation.push(...clim.validation);
     meta.climate_period = clim.period;
+    meta.climate_public = !!clim.public;
   }
   return meta;
 }

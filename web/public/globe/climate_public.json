@@ -1,0 +1,63 @@
+{
+ "period": "Mars Year 30 (Ls 19 of MY30 to Ls 19 of MY31)",
+ "layers": [
+  {
+   "id": "dust",
+   "kind": "overlay",
+   "name": "Dust",
+   "texture": "dust.png",
+   "data_kind": "Measured from orbit, gaps interpolated",
+   "units": "optical depth",
+   "min": 0.06,
+   "max": 0.24,
+   "legend": [
+    "#4c0001",
+    "#702126",
+    "#8e3f46",
+    "#9e5a55",
+    "#a46f5a",
+    "#a9825e",
+    "#ae9663",
+    "#b9af82",
+    "#c4c0ac",
+    "#d6d5d3",
+    "#ffffff"
+   ],
+   "description": "Dust in the atmosphere above each point: annual mean of the daily column dust optical depth (absorption at 9.3 um, total column down to the local surface) for Mars Year 30, a year without a global dust storm. Multiply by 2.6 for an approximate visible optical depth. 3-degree maps; it does not show dust lying on the ground or single storms.",
+   "mission": "MRO, Mars Odyssey",
+   "instrument": "MCS, THEMIS",
+   "product": "dustscenario_MY30_v2-0",
+   "source": "Montabone et al. (2015), Icarus 251, 65-95; LMD. CC BY-SA 3.0",
+   "url": "https://www-mars.lmd.jussieu.fr/mars/dust_climatology/dataset_v2/dustscenario_MY30_v2-0.nc",
+   "doc": "https://www-mars.lmd.jussieu.fr/mars/dust_climatology/"
+  }
+ ],
+ "scalars": [
+  {
+   "id": "dust",
+   "file": "dust.i16",
+   "scale": 10000,
+   "units": "",
+   "label": "Dust optical depth",
+   "width": 360,
+   "height": 180,
+   "note": "annual mean column dust optical depth, 9.3 um absorption, MY30; 3-degree product, interpolated"
+  }
+ ],
+ "validation": [
+  {
+   "ok": true,
+   "check": "Dust grid orientation: total/normalised optical depth follows surface pressure, i.e. MOLA elevation (r = -0.99; wrong orientations are far weaker)"
+  },
+  {
+   "ok": true,
+   "check": "Dust season: mean normalised optical depth is higher in Ls 180-360 (0.16) than in Ls 0-180 (0.08), the known dusty season"
+  },
+  {
+   "ok": true,
+   "check": "Dust annual mean within physical bounds (0.059 .. 0.257)"
+  }
+ ],
+ "generated_utc": "2026-11-15T02:00:01+00:00",
+ "public": true
+}

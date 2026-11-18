@@ -1,0 +1,17 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": null,
+  "installCommand": "cd web && npm ci",
+  "buildCommand": "sh pipeline/vercel_build.sh",
+  "outputDirectory": "web/dist",
+  "functions": {
+    "api/site.py": {
+      "maxDuration": 300,
+      "excludeFiles": "{web,docs,data,.claude,.venv,node_modules}/**"
+    }
+  },
+  "rewrites": [
+    { "source": "/api/site/:id", "destination": "/api/site?id=:id" },
+    { "source": "/sites/:path*", "destination": "https://vpkgdvwasmqa9x5n.public.blob.vercel-storage.com/sites/:path*" }
+  ]
+}

@@ -33,7 +33,9 @@ async function requestSite(lat: number, lon: number, size: number, onUpdate: (l:
     if (why?.error) throw new Error(why.error);
   }
   if (!r || r.status === 404 || r.status >= 500)
-    throw new Error("The site builder is not responding. Restart `npm run dev` (it starts the builder automatically) and try again.");
+    throw new Error(location.hostname === "localhost" || location.hostname === "127.0.0.1"
+      ? "The site builder is not responding. Restart `npm run dev` (it starts the builder automatically) and try again."
+      : "The site builder is not responding. Try again in a minute, or press Explore terrain to visit Jezero Crater.");
   let st = await r.json();
   let retried = false;
   if (!r.ok) throw new Error(st.error ?? `HTTP ${r.status}`);
@@ -379,6 +381,7 @@ export function Globe({ onExplore, hidden }: {
   const [shaded, setShaded] = useState(false);
   const [showGrid, setShowGrid] = useState(true);
   const [showSites, setShowSites] = useState(true);
+  const [showGuide, setShowGuide] = useState(true);
   const [hover, setHover] = useState<Pick | null>(null);
   const [pick, setPick] = useState<Pick | null>(null);
   const [site, setSite] = useState<Site | null>(null);
@@ -540,7 +543,8 @@ export function Globe({ onExplore, hidden }: {
       </Canvas>
     </div>
 
-    {meta && <div className="stage"><div className="stage-card plain" key={pick ? "picked" : "start"} role="status">
+    {meta && showGuide && <div className="stage"><div className="stage-card plain" key={pick ? "picked" : "start"} role="status">
+      <button className="link stage-dismiss" onClick={() => setShowGuide(false)}>Hide guide</button>
       <p className="stage-step">{pick ? "Place chosen" : "Start here"}</p>
       <h2>{pick ? "Land here, or pick another place" : "Pick a place on Mars"}</h2>
       <p>{pick ? "Press “Land here” in the panel on the right to see the ground in 3D." : "Drag to turn the planet, then click where you want to land. Or press “Explore terrain” to visit Jezero Crater."}</p>
@@ -577,6 +581,8 @@ export function Globe({ onExplore, hidden }: {
         </label>}
         {meta && !meta.climate_period && <p className="note">Dust, temperature and wind are built on each computer.
           Run <code>.venv/bin/python pipeline/build_climate.py</code> (about 180 MB of downloads), then reload.</p>}
+        {meta?.climate_public && <p className="note">Temperature and wind are not in the online version: their source,
+          OpenMARS, may not be redistributed. Run the project on your computer with <code>npm start</code> to see them.</p>}
       </fieldset>
       <fieldset className="group">
         <legend>Display</legend>
@@ -609,8 +615,10 @@ export function Globe({ onExplore, hidden }: {
             })}
           </tbody></table>
           <p className="note">Values from 0.125° cells (≈7.4 km); elevation above the MOLA areoid.
-            {meta?.climate_period && <> Dust comes from 3° maps and temperature and wind from a 5° weather model (reanalysis)
-              ({meta.climate_period}), interpolated: regional values, not local ones.</>}</p>
+            {meta?.climate_period && (meta.climate_public
+              ? <> Dust comes from 3° maps ({meta.climate_period}), interpolated: a regional value, not a local one.</>
+              : <> Dust comes from 3° maps and temperature and wind from a 5° weather model (reanalysis)
+                ({meta.climate_period}), interpolated: regional values, not local ones.</>)}</p>
         </> : <p className="muted">Hover or click the globe to read the NASA data at that point.</p>}
       </section>
 

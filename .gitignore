@@ -24,11 +24,11 @@ web/public/sites/
 *.log
 red-atlas-share.zip
 
-# Climate layers (dust, temperature, wind). Temperature and wind derive from OpenMARS (CC BY-NC-ND 4.0: no
-# redistribution of derivatives), so each computer rebuilds them: .venv/bin/python pipeline/build_climate.py
+# Climate layers. Temperature and wind derive from OpenMARS (CC BY-NC-ND 4.0: no redistribution of derivatives),
+# so each computer rebuilds them: .venv/bin/python pipeline/build_climate.py. Dust (CC BY-SA 3.0) is committed,
+# with climate_public.json (dust only), which the online version reads.
 data/raw/climate/
 web/public/globe/climate.json
-web/public/globe/dust.*
 web/public/globe/temp*.i16
 web/public/globe/temp.png
 web/public/globe/wind*

@@ -410,6 +410,13 @@ def main():
     meta = {"period": "Mars Year 30 (Ls 19 of MY30 to Ls 19 of MY31)", "layers": layers, "scalars": scalars,
             "validation": checks, "generated_utc": datetime.now(timezone.utc).isoformat(timespec="seconds")}
     (OUT / "climate.json").write_text(json.dumps(meta, indent=1))
+    # Dust alone may be redistributed (Montabone et al., CC BY-SA 3.0); temperature and wind may not (OpenMARS,
+    # CC BY-NC-ND 4.0). climate_public.json carries only dust and is the file that ships with the online version.
+    pub = {**meta, "public": True,
+           "layers": [l for l in layers if l["id"] == "dust"],
+           "scalars": [s for s in scalars if s["id"] == "dust"],
+           "validation": [c for c in checks if c["check"].startswith("Dust")]}
+    (OUT / "climate_public.json").write_text(json.dumps(pub, indent=1))
     print(f"\nWrote {OUT}/climate.json ({len(layers)} layers, {len(scalars)} readout grids); "
           f"downloaded {fetched / 1e6:.0f} MB this run; all checks passed.")
     print(f"  ranges: dust {dmin}-{dmax}, temperature {tlo}-{thi} K, wind {wlo}-{whi} m/s")
