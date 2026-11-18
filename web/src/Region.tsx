@@ -86,6 +86,20 @@ function TargetClamp({ controls, limit }: { controls: React.RefObject<MapControl
   return null;
 }
 
+/** Haze that follows the zoom: far out (a whole 40 km site) the view stays clear, while the edge of the
+ *  surroundings stays in the haze. Close in it matches the original fixed fog. */
+function FogFollow({ controls, half }: { controls: React.RefObject<MapControlsImpl>; half: number }) {
+  const { scene, camera } = useThree();
+  useFrame(() => {
+    const f = scene.fog as THREE.Fog | null, c = controls.current;
+    if (!f || !c) return;
+    const d = camera.position.distanceTo(c.target) * 1.15;
+    f.near = Math.max(half * 0.4, d);
+    f.far = Math.max(half * 0.95, d + half * 0.6);
+  });
+  return null;
+}
+
 /** Fires once everything inside the same Suspense boundary (all textures) has loaded and rendered once. */
 function Ready({ onReady }: { onReady: () => void }) {
   const done = useRef(false);
@@ -601,7 +615,9 @@ export default function Region({ base }: { base: string }) {
     : (data.meta.extent_m.east - data.meta.extent_m.west) / 4096;
   // Half-size of the area with data. Fog hides everything beyond it, so there is never a void at the edge.
   const half = ctx ? (ctx.extent_m.east - ctx.extent_m.west) / 2 : 3000 * k;
-  const maxDist = ctx ? Math.min(half * 0.32, 14000 * k) : 12000 * k;
+  // Zoom-out limit: never less than what shows the whole high-resolution square (a 40 km site needs ~68 km).
+  const siteEdge = data.meta.extent_m.east - data.meta.extent_m.west;
+  const maxDist = ctx ? Math.max(Math.min(half * 0.32, 14000 * k), siteEdge * 1.7) : 12000 * k;
   const camEnd = new THREE.Vector3(-2600 * k, relief0 + 1600 * k, 2400 * k);
   const camStart = new THREE.Vector3(0, Math.min(maxDist * 0.98, camEnd.length() * 2.6), 1);
 
@@ -652,6 +668,7 @@ export default function Region({ base }: { base: string }) {
           screenSpacePanning={false}
         />
         {ctx && <TargetClamp controls={controls} limit={half * 0.35} />}
+        {ctx && <FogFollow controls={controls} half={half} />}
         {intro && <CameraIntro controls={controls} start={camStart} end={camEnd} run={ready} onDone={() => setIntro(false)} />}
         <CameraProbe controls={controls} onUpdate={(az, mpp) => setCam({ az, mpp })} />
         <Picker data={data} exaggeration={exaggeration} onHover={setHover} onPick={setPick} />
